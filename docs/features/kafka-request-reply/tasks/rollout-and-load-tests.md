@@ -49,7 +49,7 @@ Verifies zero lane reassignment in a rolling restart, weights and minimum share 
 > | Aspect | Target | Measurement |
 > |---|---|---|
 > | Aggregate throughput | ≥ 2,000 requests/s per worker group (provisional, "thousands" per interview) | load test in the performance environment |
-> | Rate Budget accuracy | accepted rate ≤ Rate Budget × 1.05 in any sliding 1 s window (provisional) | worker "accepted per second" metric vs configured budget |
+> | Rate Budget accuracy | accepted rate ≤ Rate Budget × 1.10 in any sliding 1 s window (provisional) | worker "accepted per second" metric vs configured budget |
 > | Priority Weight accuracy | each lane within ±10 percentage points of its effective share (weights normalised, minimum share 5%) when all lanes are busy (provisional) | per-lane accepted-rate metric |
 > | Lane reassignment during rolling restart | 0 for workers that return within the identity window | rollout test + group membership change counter |
 >
@@ -106,7 +106,7 @@ Internal — no API surface.
 ## Checklist
 
 - [ ] Create tests under `src/test/java/xme/common/kfkprocessor/requestreply/performance/`: rolling restart of workers with the same identities within the identity window, group membership change counter must stay 0 for the others
-- [ ] Backlog catch-up with several workers: accepted per second never above budget × 1.05 in any sliding 1 s window
+- [ ] Backlog catch-up with several workers: accepted per second never above budget × 1.10 in any sliding 1 s window
 - [ ] Three busy lanes: each lane within ±10 points of its effective share; a 1% lane still gets ≥ 5%
 - [ ] Throughput run against the ≥ 2,000 requests/s per group target in the performance environment; report the head-of-line delay and the effect of per-key ordering; failing the provisional target is reported, not hidden
 - [ ] Mark the slow load run so it is excluded from the default unit build

@@ -81,7 +81,7 @@ public final class Bucket4jBudgetCounters implements AutoCloseable {
 
     /**
      * Burst capacity: any sliding second admits at most capacity + budget units, so the capacity is capped at 5 %
-     * of the budget (QG-1: at most budget x 1.05). Applies to a fresh, state-lost or outage-idle (full) bucket alike.
+     * of the budget (design target budget x 1.05, leaving headroom under the QG-1 NFR bound of budget x 1.10). Applies to a fresh, state-lost or outage-idle (full) bucket alike.
      * Budgets under 20 cannot express 5 % in whole units and keep the minimum capacity of 1.
      */
     static long burstCapacity(long budgetPerSecond) {

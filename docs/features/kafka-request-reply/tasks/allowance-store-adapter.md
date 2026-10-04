@@ -44,7 +44,7 @@ Provides the cross-worker allowance counter behind the `AllowanceStore` port so 
 
 > | Aspect | Target | Measurement |
 > |---|---|---|
-> | Rate Budget accuracy | accepted rate ≤ Rate Budget × 1.05 in any sliding 1 s window (provisional) | worker "accepted per second" metric vs configured budget |
+> | Rate Budget accuracy | accepted rate ≤ Rate Budget × 1.10 in any sliding 1 s window (provisional) | worker "accepted per second" metric vs configured budget |
 > | Pause on limiter outage | new requests stop within 5 s of the store becoming unreachable; resume within 30 s of its return (provisional) | failure-scenario test |
 >
 > — `spec.md §6, NFR table rows Rate Budget accuracy, Pause on limiter outage, verbatim` · full text: [spec.md](../spec.md)
@@ -102,12 +102,12 @@ No DB changes.
 |---|---|
 | Request exceeds remaining allowance | Grants the remainder, possibly 0; never more than the budget in the window. |
 | Store unreachable | Throws `AllowanceStoreUnavailableException`; caller fails closed (T8). |
-| Two workers reserve at the same instant | Total granted stays within the Rate Budget (× 1.05 tolerance in any sliding 1 s window). |
+| Two workers reserve at the same instant | Total granted stays within the Rate Budget (× 1.10 tolerance in any sliding 1 s window). |
 | `giveBack` after a failed Cycle | Units return to the shared counter; if the return fails, the unit stays consumed, which only lowers throughput and never exceeds the budget. |
 
 ## Definition of Done
 
-- [ ] Integration test: two clients never exceed the budget in a sliding 1 s window beyond × 1.05
+- [ ] Integration test: two clients never exceed the budget in a sliding 1 s window beyond × 1.10
 - [ ] Integration test: stopping the store raises `AllowanceStoreUnavailableException`
 - [ ] every Hard Rule inlined above still holds
 - [ ] lint + vet clean (`./gradlew build`)

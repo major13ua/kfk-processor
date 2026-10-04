@@ -117,4 +117,32 @@ class LaneSharesTest {
         assertThrows(IllegalArgumentException.class,
                 () -> LaneShares.split(weights("a", 5, "b", -1), MIN, Set.of("a", "b"), 10));
     }
+
+    @Test
+    void tinyGrantsConvergeToEffectiveSharesWithCarryOver() {
+        Map<String, Double> w = weights("a", 1, "b", 60, "c", 39);
+        Map<String, Double> credit = new java.util.HashMap<>();
+        Map<String, Integer> total = new LinkedHashMap<>();
+        for (int i = 0; i < 1000; i++) {
+            Map<String, Integer> u = LaneShares.split(w, 0.05, Set.of("a", "b", "c"), 1, credit);
+            assertEquals(1, u.values().stream().mapToInt(Integer::intValue).sum());
+            u.forEach((k, v) -> total.merge(k, v, Integer::sum));
+        }
+        // effective shares: a 5%, b 57.5%, c 37.5%
+        assertEquals(50, total.get("a"), 1);
+        assertEquals(575, total.get("b"), 2);
+        assertEquals(375, total.get("c"), 2);
+    }
+
+    @Test
+    void idleLaneCreditIsDroppedAndUnitsStillSumToDraw() {
+        Map<String, Double> w = weights("a", 1, "b", 1);
+        Map<String, Double> credit = new java.util.HashMap<>();
+        for (int i = 0; i < 100; i++) {
+            Map<String, Integer> u = LaneShares.split(w, 0.05, Set.of("a"), 3, credit);
+            assertEquals(3, u.get("a"));
+            assertEquals(0, u.get("b"));
+        }
+        assertEquals(false, credit.containsKey("b"));
+    }
 }

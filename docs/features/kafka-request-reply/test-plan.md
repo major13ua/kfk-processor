@@ -93,7 +93,7 @@ A reusable worker starter: global Rate Budget at intake, weighted Priority Lanes
 
 - Aggregate throughput ≥ 2,000 requests/s → sustain 2,000 requests/s on a group of workers with fast Handlers for 10 minutes, assert sustained accepted rate ≥ 2,000/s and no rise in error replies.
 - Throughput with real key skew → replay the pilot service's key distribution at 2,000 requests/s for 10 minutes, assert target still met (open question on per-key ordering).
-- Rate Budget accuracy ≤ budget × 1.05 → build a backlog of 5 minutes of traffic, start workers, assert accepted per second ≤ 1.05 × budget in every sliding 1 s window during 10 minutes of catch-up, including one worker restart.
+- Rate Budget accuracy ≤ budget × 1.10 → build a backlog of 5 minutes of traffic, start workers, assert accepted per second ≤ 1.10 × budget in every sliding 1 s window during 10 minutes of catch-up, including one worker restart.
 - Priority Weight accuracy ±10 pp → three lanes, all busy, run 10 minutes at the budget, assert each lane's accepted-rate share within 10 pp of its effective share.
 - Pause on limiter outage (new requests stop within 5 s, resume within 30 s) → cut the allowance store for 2 minutes under 1,000 requests/s, assert intake stops within 5 s and resumes within 30 s of return (integration scale, also run in the performance environment).
 - Consistency Lag p95 and Stall detection: <!-- N/A: lag target is TBD (§8); stall threshold is covered by the integration test above -->

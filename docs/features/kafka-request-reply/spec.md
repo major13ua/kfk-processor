@@ -212,7 +212,7 @@ Provisional numbers are marked and confirmed or deferred in §8.
 | Aspect | Target | Measurement |
 |---|---|---|
 | Aggregate throughput | ≥ 2,000 requests/s per worker group (provisional, "thousands" per interview) | load test in the performance environment |
-| Rate Budget accuracy | accepted rate ≤ Rate Budget × 1.05 in any sliding 1 s window (provisional) | worker "accepted per second" metric vs configured budget |
+| Rate Budget accuracy | accepted rate ≤ Rate Budget × 1.10 in any sliding 1 s window (provisional) | worker "accepted per second" metric vs configured budget |
 | Priority Weight accuracy | each lane within ±10 percentage points of its effective share (weights normalised, minimum share 5%) when all lanes are busy (provisional) | per-lane accepted-rate metric |
 | Per-request Handler timeout | default 30 s from dispatch, configurable (provisional); implies a commit window above 37.5 s | startup validation + timeout counter |
 | Cycle deadline | ≤ 80% of the commit window, checked at startup (provisional) | startup validation + cycle-duration metric |

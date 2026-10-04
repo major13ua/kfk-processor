@@ -41,7 +41,7 @@ Proves 0 lost or duplicated committed replies under kill, failed commit, unavail
 > — `sad.md §10, QG-2 Reply integrity, verbatim` · full text: [sad.md](../sad.md)
 
 > - **When:** several workers share one Rate Budget and a backlog exists, or the Rate Budget store becomes unreachable.
-> - **Then:** accepted rate ≤ Rate Budget × 1.05 in any sliding 1 s window (provisional); new requests stop within 5 s of the store becoming unreachable and resume within 30 s of its return (provisional); aggregate throughput ≥ 2,000 requests/s per worker group (provisional).
+> - **Then:** accepted rate ≤ Rate Budget × 1.10 in any sliding 1 s window (provisional); new requests stop within 5 s of the store becoming unreachable and resume within 30 s of its return (provisional); aggregate throughput ≥ 2,000 requests/s per worker group (provisional).
 > - **How verify:** load test in the performance environment against the worker "accepted per second" metric (counted at Cycle intake, the same event the limiter counts) vs the configured budget; failure-scenario test that cuts the store.
 >
 > — `sad.md §10, QG-1 Downstream protection, verbatim` · full text: [sad.md](../sad.md)

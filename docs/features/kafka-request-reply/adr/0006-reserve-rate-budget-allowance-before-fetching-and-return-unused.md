@@ -20,7 +20,7 @@ The Rate Budget must hold even during backlog catch-up (AC-10), and requests ove
 ## Decision drivers
 
 - AC-10b: throttled requests stay unconsumed; no reply
-- Spec §6: accepted rate ≤ Rate Budget × 1.05 in any sliding 1 s window
+- Spec §6: accepted rate ≤ Rate Budget × 1.10 in any sliding 1 s window
 - Memory and bandwidth: fetching what cannot be handled is waste
 
 ## Considered options

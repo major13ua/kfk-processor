@@ -19,7 +19,7 @@ target_surfaces: [library-sdk, worker]  # library-sdk: the starter's public Hand
 
 **Top-3 quality goals (1-liners; full scenarios in §10):**
 
-1. **Downstream protection:** accepted requests stay within the Rate Budget (×1.05 in any sliding 1 s window) across all workers, and the worker fails closed when the limiter is unavailable.
+1. **Downstream protection:** accepted requests stay within the Rate Budget (×1.10 in any sliding 1 s window) across all workers, and the worker fails closed when the limiter is unavailable.
 2. **Reply integrity:** 0 lost or duplicated committed replies, including under restarts and failed Cycles.
 3. **Rollout stability:** 0 lane reassignment for workers that return within the Identity window.
 
@@ -415,7 +415,7 @@ ADR files live in `docs/features/kafka-request-reply/adr/`, named `NNNN-title.md
 
 **QG-1. Downstream protection**
 - **When:** several workers share one Rate Budget and a backlog exists, or the Rate Budget store becomes unreachable.
-- **Then:** accepted rate ≤ Rate Budget × 1.05 in any sliding 1 s window (provisional); new requests stop within 5 s of the store becoming unreachable and resume within 30 s of its return (provisional); aggregate throughput ≥ 2,000 requests/s per worker group (provisional).
+- **Then:** accepted rate ≤ Rate Budget × 1.10 in any sliding 1 s window (provisional); new requests stop within 5 s of the store becoming unreachable and resume within 30 s of its return (provisional); aggregate throughput ≥ 2,000 requests/s per worker group (provisional).
 - **How verify:** load test in the performance environment against the worker "accepted per second" metric (counted at Cycle intake, the same event the limiter counts) vs the configured budget; failure-scenario test that cuts the store.
 
 **QG-2. Reply integrity**

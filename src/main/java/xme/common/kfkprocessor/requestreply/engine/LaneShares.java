@@ -1,6 +1,7 @@
 package xme.common.kfkprocessor.requestreply.engine;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,6 +64,17 @@ public final class LaneShares {
      */
     public static Map<String, Integer> split(
             Map<String, Double> weights, double minShare, Set<String> busyLanes, int draw) {
+        return split(weights, minShare, busyLanes, draw, new HashMap<>());
+    }
+
+    /**
+     * Like {@link #split(Map, double, Set, int)} but carries fractional credit across calls in {@code credit}
+     * (mutated), so long-run lane shares converge to the effective shares even when each draw is tiny.
+     * Deterministic; units always sum to {@code draw}; credit of lanes that are not busy is dropped.
+     */
+    public static Map<String, Integer> split(
+            Map<String, Double> weights, double minShare, Set<String> busyLanes, int draw,
+            Map<String, Double> credit) {
         Map<String, Double> shares = effectiveShares(weights, minShare);
         Map<String, Integer> units = new LinkedHashMap<>();
         List<String> busy = new ArrayList<>();
@@ -74,41 +86,27 @@ public final class LaneShares {
                 busyTotal += e.getValue();
             }
         }
+        credit.keySet().retainAll(busy);
         if (busy.isEmpty() || draw <= 0) {
             return units;
         }
-        double[] remainder = new double[busy.size()];
-        int assigned = 0;
-        for (int i = 0; i < busy.size(); i++) {
-            double exact = shares.get(busy.get(i)) / busyTotal * draw;
-            int base = (int) Math.floor(exact + EPS);
-            units.put(busy.get(i), base);
-            remainder[i] = exact - base;
-            assigned += base;
+        for (String lane : busy) {
+            // a lane seen for the first time starts ahead by (1 - share), so low-share lanes are never
+            // rounded below their effective share over a finite horizon
+            double carried = credit.containsKey(lane) ? credit.get(lane) : 1.0 - shares.get(lane);
+            credit.put(lane, carried + shares.get(lane) / busyTotal * draw);
         }
-        for (int left = draw - assigned; left > 0; left--) {
-            int best = 0;
-            for (int i = 1; i < remainder.length; i++) {
-                if (remainder[i] > remainder[best]) {
-                    best = i;
+        for (int i = 0; i < draw; i++) {
+            String best = busy.get(0);
+            for (String lane : busy) {
+                if (credit.get(lane) > credit.get(best) + EPS) {
+                    best = lane;
                 }
             }
-            units.merge(busy.get(best), 1, Integer::sum);
-            remainder[best] = -1;
-            if (left > 1 && allUsed(remainder)) {
-                java.util.Arrays.fill(remainder, 0);
-            }
+            units.merge(best, 1, Integer::sum);
+            credit.merge(best, -1.0, Double::sum);
         }
         return units;
-    }
-
-    private static boolean allUsed(double[] remainder) {
-        for (double r : remainder) {
-            if (r >= 0) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private static void validate(Map<String, Double> weights) {

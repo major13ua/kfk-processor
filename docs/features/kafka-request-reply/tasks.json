@@ -62,7 +62,7 @@
         "AC-10",
         "AC-18"
       ],
-      "dod": "Two clients on one Redis-compatible store never take more than the Rate Budget (× 1.05) in a sliding second, and an unreachable store raises the fail-closed exception.",
+      "dod": "Two clients on one Redis-compatible store never take more than the Rate Budget (× 1.10) in a sliding second, and an unreachable store raises the fail-closed exception.",
       "files_hint": [
         "src/main/java/xme/common/kfkprocessor/requestreply/adapters/allowance/",
         "build.gradle"
@@ -301,7 +301,7 @@
         "AC-12",
         "AC-14"
       ],
-      "dod": "Rolling restart shows 0 reassignments, accepted rate stays within budget × 1.05, lanes stay within ±10 points, throughput is measured against 2,000 requests/s.",
+      "dod": "Rolling restart shows 0 reassignments, accepted rate stays within budget × 1.10, lanes stay within ±10 points, throughput is measured against 2,000 requests/s.",
       "files_hint": [
         "src/test/java/xme/common/kfkprocessor/requestreply/performance/"
       ],

@@ -63,7 +63,7 @@ Takes allowance before fetching, splits it across lanes, returns what was not us
 
 > | Aspect | Target | Measurement |
 > |---|---|---|
-> | Rate Budget accuracy | accepted rate ≤ Rate Budget × 1.05 in any sliding 1 s window (provisional) | worker "accepted per second" metric vs configured budget |
+> | Rate Budget accuracy | accepted rate ≤ Rate Budget × 1.10 in any sliding 1 s window (provisional) | worker "accepted per second" metric vs configured budget |
 > | Pause on limiter outage | new requests stop within 5 s of the store becoming unreachable; resume within 30 s of its return (provisional) | failure-scenario test |
 >
 > — `spec.md §6, NFR table rows Rate Budget accuracy, Pause on limiter outage, verbatim` · full text: [spec.md](../spec.md)

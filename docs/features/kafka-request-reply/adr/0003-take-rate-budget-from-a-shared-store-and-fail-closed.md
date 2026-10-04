@@ -21,7 +21,7 @@ The core of this decision was fixed in the spec and interview; the options marke
 
 ## Decision drivers
 
-- Goal 1: accepted rate ≤ Rate Budget × 1.05 in any sliding 1 s window (spec §6, provisional)
+- Goal 1: accepted rate ≤ Rate Budget × 1.10 in any sliding 1 s window (spec §6, provisional)
 - AC-18: pause when the store is unavailable, resume without exceeding the budget
 - Existing capability: an in-memory store XME already runs (spec §8, Redis-compatible chosen for the first adapter)
 

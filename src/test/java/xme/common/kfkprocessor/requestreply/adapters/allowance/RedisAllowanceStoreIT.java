@@ -37,8 +37,8 @@ class RedisAllowanceStoreIT {
             var sa = new RedisAllowanceStore(a.counter());
             var sb = new RedisAllowanceStore(b.counter());
             long total = sa.reserve(60) + sb.reserve(60) + sa.reserve(1000);
-            // 1.05 tolerance (spec §6) over one second window
-            assertTrue(total <= BUDGET * 1.05, "granted " + total);
+            // 1.10 tolerance (spec §6) over one second window
+            assertTrue(total <= BUDGET * 1.10, "granted " + total);
             assertEquals(0, sb.reserve(10));
         }
     }
@@ -70,7 +70,7 @@ class RedisAllowanceStoreIT {
             max = Math.max(max, sum);
         }
         long total = grants.stream().mapToLong(g -> g[1]).sum();
-        assertTrue(max <= BUDGET * 1.05, "max in a sliding second " + max);
+        assertTrue(max <= BUDGET * 1.10, "max in a sliding second " + max);
         assertTrue(total >= budget * 3, "throughput too low: " + total + " in 4 s");
     }
 

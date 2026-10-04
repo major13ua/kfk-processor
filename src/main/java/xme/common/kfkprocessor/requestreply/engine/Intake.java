@@ -29,6 +29,7 @@ public final class Intake {
     private final long maxPayloadBytes;
     private final int drawPerRound;
     private final Duration probeInterval;
+    private final Map<String, Double> laneCredit = new HashMap<>();
     private boolean paused;
     private Instant lastAttempt;
 
@@ -84,7 +85,7 @@ public final class Intake {
         Set<String> busy = laneWeights.keySet();
         while (granted - accepted.size() > 0 && !busy.isEmpty()) {
             Map<String, Integer> quota =
-                    LaneShares.split(laneWeights, minLaneShare, busy, (int) (granted - accepted.size()));
+                    LaneShares.split(laneWeights, minLaneShare, busy, (int) (granted - accepted.size()), laneCredit);
             Map<String, Integer> got = new HashMap<>();
             for (IncomingRequest r : lanes.fetch(quota)) {
                 got.merge(r.lane(), 1, Integer::sum);

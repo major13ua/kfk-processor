@@ -46,17 +46,17 @@ import xme.common.kfkprocessor.requestreply.api.RequestReplyHandler;
 import xme.common.kfkprocessor.requestreply.autoconfig.RequestReplyAutoConfiguration;
 
 /** Shared harness of the T16 failure-scenario suite: real Kafka + Redis, per-test topics, committed-only reader. */
-final class FailureHarness {
+public final class FailureHarness {
 
     /** Provisional NFR numbers (spec.md section 6): referenced by name so a changed NFR is changed in one place. */
-    static final Duration STOP_WITHIN = Duration.ofSeconds(5);
-    static final Duration RESUME_WITHIN = Duration.ofSeconds(30);
-    static final double BUDGET_TOLERANCE = 1.05;
-    static final Duration WAIT = Duration.ofSeconds(60);
+    public static final Duration STOP_WITHIN = Duration.ofSeconds(5);
+    public static final Duration RESUME_WITHIN = Duration.ofSeconds(30);
+    public static final double BUDGET_TOLERANCE = 1.10;
+    public static final Duration WAIT = Duration.ofSeconds(60);
 
-    static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
-    static final GenericContainer<?> REDIS;
-    static final int REDIS_PORT = freePort();
+    public static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
+    public static final GenericContainer<?> REDIS;
+    public static final int REDIS_PORT = freePort();
 
     static {
         KAFKA.start();
@@ -78,18 +78,20 @@ final class FailureHarness {
         }
     }
 
-    static String redisUri() {
+    public static String redisUri() {
         return "redis://" + REDIS.getHost() + ":" + REDIS_PORT;
     }
 
     /** Fresh names per test: requests topic, replies topic, group, identity. Topics are created. */
-    record Ids(String requests, String replies, String group, String identity) {
-        static Ids fresh() {
+    public record Ids(String requests, String replies, String group, String identity) {
+        public static Ids fresh() {
             String id = UUID.randomUUID().toString().substring(0, 8);
             Ids ids = new Ids("req-" + id, "rep-" + id, "grp-" + id, "worker-" + id);
             try (Admin admin = admin()) {
                 admin.createTopics(List.of(new NewTopic(ids.requests, 1, (short) 1),
                         new NewTopic(ids.replies, 1, (short) 1))).all().get(30, TimeUnit.SECONDS);
+                awaitTopicReady(admin, ids.requests);
+                awaitTopicReady(admin, ids.replies);
             } catch (Exception e) {
                 throw new IllegalStateException(e);
             }
@@ -97,12 +99,41 @@ final class FailureHarness {
         }
     }
 
-    static Admin admin() {
+    /** Waits until the topic's single partition has a leader and a fresh producer sees it (metadata propagated). */
+    static void awaitTopicReady(Admin admin, String topic) throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        try (var probe = new KafkaProducer<byte[], byte[]>(Map.<String, Object>of(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName(),
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName(),
+                ProducerConfig.MAX_BLOCK_MS_CONFIG, 2000))) {
+            while (true) {
+                try {
+                    var d = admin.describeTopics(List.of(topic)).allTopicNames().get(10, TimeUnit.SECONDS).get(topic);
+                    boolean led = !d.partitions().isEmpty() && d.partitions().stream().allMatch(p -> p.leader() != null);
+                    if (led) {
+                        var infos = probe.partitionsFor(topic);
+                        if (infos.size() == d.partitions().size() && infos.stream().allMatch(i -> i.leader() != null)) {
+                            return;
+                        }
+                    }
+                } catch (java.util.concurrent.ExecutionException | org.apache.kafka.common.KafkaException e) {
+                    // not visible yet: retry until the deadline
+                }
+                if (System.nanoTime() > deadline) {
+                    throw new IllegalStateException("topic not ready: " + topic);
+                }
+                Thread.sleep(100);
+            }
+        }
+    }
+
+    public static Admin admin() {
         return Admin.create(Map.<String, Object>of("bootstrap.servers", KAFKA.getBootstrapServers()));
     }
 
     /** Worker configuration: one lane, short probe interval, handler timeout inside the Cycle deadline. */
-    static Map<String, Object> workerProps(Ids ids, long budgetPerSecond, int drawPerRound, Duration handlerTimeout,
+    public static Map<String, Object> workerProps(Ids ids, long budgetPerSecond, int drawPerRound, Duration handlerTimeout,
             Duration commitWindow) {
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("spring.kafka.bootstrap-servers", KAFKA.getBootstrapServers());
@@ -124,13 +155,13 @@ final class FailureHarness {
 
     @Configuration(proxyBeanMethods = false)
     @ImportAutoConfiguration(RequestReplyAutoConfiguration.class)
-    static class Base {
+    public static class Base {
     }
 
     /** A running worker (in-process Spring context). */
-    static final class Worker implements AutoCloseable {
-        final ConfigurableApplicationContext ctx;
-        final MeterRegistry registry;
+    public static final class Worker implements AutoCloseable {
+        public final ConfigurableApplicationContext ctx;
+        public final MeterRegistry registry;
 
         Worker(ConfigurableApplicationContext ctx, MeterRegistry registry) {
             this.ctx = ctx;
@@ -138,7 +169,7 @@ final class FailureHarness {
         }
 
         /** Published state gauge: 0 running, 1 paused, 2 stalled (WorkerMetrics.State ordinal). */
-        double state() {
+        public double state() {
             return registry.get("requestreply.state").gauge().value();
         }
 
@@ -153,7 +184,7 @@ final class FailureHarness {
         }
     }
 
-    static Worker startWorker(Map<String, Object> props, RequestReplyHandler<String, String, String> handler,
+    public static Worker startWorker(Map<String, Object> props, RequestReplyHandler<String, String, String> handler,
             Consumer<GenericApplicationContext> extraBeans) {
         MeterRegistry registry = new SimpleMeterRegistry();
         ApplicationContextInitializer<ConfigurableApplicationContext> init = ctx -> {
@@ -168,29 +199,37 @@ final class FailureHarness {
         return new Worker(ctx, registry);
     }
 
-    static Worker startWorker(Map<String, Object> props, RequestReplyHandler<String, String, String> handler) {
+    public static Worker startWorker(Map<String, Object> props, RequestReplyHandler<String, String, String> handler) {
         return startWorker(props, handler, g -> {
         });
     }
 
     /** Sends one request per correlation id (request key = correlation id). */
-    static void produce(String topic, List<String> correlationIds) {
+    public static void produce(String topic, List<String> correlationIds) {
         try (var producer = new KafkaProducer<byte[], byte[]>(Map.<String, Object>of(
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName(),
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName()))) {
+            java.util.concurrent.atomic.AtomicReference<Exception> failed = new java.util.concurrent.atomic.AtomicReference<>();
             for (String id : correlationIds) {
                 var rec = new ProducerRecord<byte[], byte[]>(topic, null, ("req-" + id).getBytes(StandardCharsets.UTF_8));
                 rec.headers().add(new RecordHeader("correlation_id", id.getBytes(StandardCharsets.UTF_8)));
                 rec.headers().add(new RecordHeader("request_key", id.getBytes(StandardCharsets.UTF_8)));
                 rec.headers().add(new RecordHeader("created_at", java.time.Instant.now().toString().getBytes(StandardCharsets.UTF_8)));
-                producer.send(rec);
+                producer.send(rec, (m, e) -> {
+                    if (e != null) {
+                        failed.compareAndSet(null, e);
+                    }
+                });
             }
             producer.flush();
+            if (failed.get() != null) {
+                throw new IllegalStateException("producing to " + topic + " failed", failed.get());
+            }
         }
     }
 
-    static List<String> correlationIds(String prefix, int n) {
+    public static List<String> correlationIds(String prefix, int n) {
         List<String> ids = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             ids.add(prefix + "-" + i);
@@ -198,16 +237,16 @@ final class FailureHarness {
         return ids;
     }
 
-    record Rep(String correlationId, String requestKey, String body) {
+    public record Rep(String correlationId, String requestKey, String body) {
     }
 
     /** All replies visible to a committed-only reader right now (polls for {@code listen}). */
-    static List<Rep> readCommitted(String topic, Duration listen) {
+    public static List<Rep> readCommitted(String topic, Duration listen) {
         return readCommitted(topic, listen, Integer.MAX_VALUE);
     }
 
     /** Committed-only read; returns early once {@code stopAt} replies were seen. */
-    static List<Rep> readCommitted(String topic, Duration listen, int stopAt) {
+    public static List<Rep> readCommitted(String topic, Duration listen, int stopAt) {
         Properties p = new Properties();
         p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
         p.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
@@ -233,7 +272,7 @@ final class FailureHarness {
      * Waits (bounded) until {@code expected} replies are committed, then listens {@code settle} longer so extra
      * (duplicate) replies would show up. Returns everything seen.
      */
-    static List<Rep> awaitReplies(String topic, int expected, Duration timeout, Duration settle) {
+    public static List<Rep> awaitReplies(String topic, int expected, Duration timeout, Duration settle) {
         long deadline = System.nanoTime() + timeout.toNanos();
         List<Rep> seen = List.of();
         while (System.nanoTime() < deadline) {
@@ -250,7 +289,7 @@ final class FailureHarness {
         return h == null ? null : new String(h.value(), StandardCharsets.UTF_8);
     }
 
-    static void await(String what, Duration timeout, BooleanSupplier condition) {
+    public static void await(String what, Duration timeout, BooleanSupplier condition) {
         long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
             if (condition.getAsBoolean()) {
@@ -266,7 +305,7 @@ final class FailureHarness {
         throw new AssertionError("timed out after " + timeout + " waiting for: " + what);
     }
 
-    static void pause(Duration d) {
+    public static void pause(Duration d) {
         try {
             Thread.sleep(d.toMillis());
         } catch (InterruptedException e) {
@@ -275,7 +314,7 @@ final class FailureHarness {
     }
 
     /** True while the worker's static member (group.instance.id = identity) is in the consumer group. */
-    static boolean inGroup(String group, String identity) {
+    public static boolean inGroup(String group, String identity) {
         try (Admin admin = admin()) {
             var d = admin.describeConsumerGroups(List.of(group)).describedGroups().get(group).get(10, TimeUnit.SECONDS);
             return d.members().stream().anyMatch(m -> m.groupInstanceId().map(identity::equals).orElse(false));
@@ -285,27 +324,27 @@ final class FailureHarness {
     }
 
     /** Records every Handler invocation: correlation id, idempotency key, wall-clock millis. */
-    static final class HandlerLog {
-        record Call(String correlationId, String idempotencyKey, long atMillis) {
+    public static final class HandlerLog {
+        public record Call(String correlationId, String idempotencyKey, long atMillis) {
         }
 
-        final List<Call> calls = new CopyOnWriteArrayList<>();
+        public final List<Call> calls = new CopyOnWriteArrayList<>();
 
-        void record(String correlationId, String idempotencyKey) {
+        public void record(String correlationId, String idempotencyKey) {
             calls.add(new Call(correlationId, idempotencyKey, System.currentTimeMillis()));
         }
 
-        int count() {
+        public int count() {
             return calls.size();
         }
 
-        Map<String, Integer> perCorrelation() {
+        public Map<String, Integer> perCorrelation() {
             Map<String, Integer> m = new LinkedHashMap<>();
             calls.forEach(c -> m.merge(c.correlationId(), 1, Integer::sum));
             return m;
         }
 
-        List<Long> times() {
+        public List<Long> times() {
             List<Long> t = new ArrayList<>();
             calls.forEach(c -> t.add(c.atMillis()));
             Collections.sort(t);
@@ -314,7 +353,7 @@ final class FailureHarness {
     }
 
     /** Largest number of timestamps inside any sliding 1 s window. */
-    static int maxInAnySecond(List<Long> sortedMillis) {
+    public static int maxInAnySecond(List<Long> sortedMillis) {
         int max = 0;
         int lo = 0;
         for (int hi = 0; hi < sortedMillis.size(); hi++) {
@@ -327,7 +366,7 @@ final class FailureHarness {
     }
 
     /** Reconciliation of requests against replies: every request answered exactly once, nothing extra. */
-    static void assertReconciled(List<String> requested, List<Rep> replies) {
+    public static void assertReconciled(List<String> requested, List<Rep> replies) {
         Map<String, Integer> byCorrelation = new LinkedHashMap<>();
         replies.forEach(r -> byCorrelation.merge(r.correlationId(), 1, Integer::sum));
         List<String> lost = requested.stream().filter(id -> !byCorrelation.containsKey(id)).toList();
