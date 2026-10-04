@@ -1,0 +1,221 @@
+package xme.common.kfkprocessor.requestreply.engine;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Test;
+import xme.common.kfkprocessor.requestreply.api.ErrorCategory;
+import xme.common.kfkprocessor.requestreply.api.IdempotencyKey;
+import xme.common.kfkprocessor.requestreply.api.RequestContext;
+import xme.common.kfkprocessor.requestreply.api.RequestReplyHandler;
+import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
+
+class HandlerExecutorTest {
+
+    private static final Duration TIMEOUT = Duration.ofMillis(50);
+    private static final Duration LONG_DEADLINE = Duration.ofSeconds(10);
+    private static final String SECRET = "SECRET-payload-and-stack";
+
+    private static IncomingRequest req(String lane, long pos, String key, String body) {
+        return new IncomingRequest(lane, 3, pos, key, "corr-" + pos, Map.of("h", new byte[] {1}), body.getBytes());
+    }
+
+    private static HandlerExecutor<String, String, String> executor(
+            RequestReplyHandler<String, String, String> h, Duration timeout) {
+        return new HandlerExecutor<>(h, r -> new String(r.payload()), timeout);
+    }
+
+    @Test
+    void failingHandlerGivesFailureErrorReplyWithCategoryOnlyAndOthersGetNormalReplies() {
+        var executor = executor((ctx, in) -> {
+            if (in.equals("bad")) {
+                throw new IllegalStateException(SECRET);
+            }
+            return in.toUpperCase();
+        }, TIMEOUT);
+
+        var results = executor.executeCycle(List.of(req("a", 1, "k1", "ok"), req("a", 2, "k2", "bad")), LONG_DEADLINE);
+
+        assertEquals(2, results.size());
+        assertTrue(results.get(0).isSuccess());
+        assertEquals("OK", results.get(0).reply().data());
+        assertEquals("corr-1", results.get(0).reply().correlationId());
+        assertFalse(results.get(1).isSuccess());
+        assertEquals(ErrorCategory.FAILURE, results.get(1).errorReply().category());
+        assertEquals("corr-2", results.get(1).errorReply().correlationId());
+        assertEquals("k2", results.get(1).errorReply().requestKey());
+        assertNull(results.get(1).reply());
+        assertFalse(results.toString().contains(SECRET), "handler exception text must never reach results");
+    }
+
+    @Test
+    void failedHandlerIsInvokedExactlyOnce() {
+        var calls = new AtomicInteger();
+        var executor = executor((ctx, in) -> {
+            calls.incrementAndGet();
+            throw new RuntimeException(SECRET);
+        }, TIMEOUT);
+
+        var results = executor.executeCycle(List.of(req("a", 1, "k", "x")), LONG_DEADLINE);
+
+        assertEquals(1, results.size());
+        assertEquals(ErrorCategory.FAILURE, results.get(0).errorReply().category());
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    void cancelAwareSlowHandlerGetsTimeoutErrorReplyAndSignalIsSet() throws Exception {
+        var observedCancel = new CountDownLatch(1);
+        var calls = new AtomicInteger();
+        var executor = executor((ctx, in) -> {
+            calls.incrementAndGet();
+            while (!ctx.cancellation().isCancelled()) {
+                Thread.onSpinWait();
+            }
+            observedCancel.countDown();
+            ctx.cancellation().throwIfCancelled();
+            return "never";
+        }, TIMEOUT);
+
+        var results = executor.executeCycle(List.of(req("a", 1, "k", "x")), LONG_DEADLINE);
+
+        assertEquals(1, results.size());
+        assertEquals(ErrorCategory.TIMEOUT, results.get(0).errorReply().category());
+        assertTrue(observedCancel.await(5, TimeUnit.SECONDS), "handler must see the cancellation signal");
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    void cancelIgnoringHandlerStillGetsTimeoutAndItsLateCompletionIsDiscarded() throws Exception {
+        var release = new CountDownLatch(1);
+        var finished = new CountDownLatch(1);
+        var calls = new AtomicInteger();
+        var executor = executor((ctx, in) -> {
+            calls.incrementAndGet();
+            try {
+                release.await();
+            } finally {
+                finished.countDown();
+            }
+            return "late";
+        }, TIMEOUT);
+
+        var results = executor.executeCycle(List.of(req("a", 1, "k", "x")), LONG_DEADLINE);
+        assertEquals(1, results.size());
+        assertEquals(ErrorCategory.TIMEOUT, results.get(0).errorReply().category());
+
+        release.countDown();
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
+        assertEquals(ErrorCategory.TIMEOUT, results.get(0).errorReply().category(), "first outcome stands");
+        assertNull(results.get(0).reply());
+        assertEquals(1, results.size());
+        assertEquals(1, calls.get(), "timed-out handler is never re-run");
+    }
+
+    @Test
+    void cycleDeadlineEndsUnfinishedRequestsWithTimeoutEvenWhenPerRequestTimeoutIsLonger() throws Exception {
+        var hold = new CountDownLatch(1);
+        var executor = executor((ctx, in) -> {
+            if (in.equals("slow")) {
+                hold.await();
+            }
+            return "done-" + in;
+        }, Duration.ofSeconds(60));
+
+        long start = System.nanoTime();
+        var results = executor.executeCycle(
+                List.of(req("low", 1, "k1", "slow"), req("high", 2, "k2", "fast")), Duration.ofMillis(100));
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        try {
+            assertTrue(elapsedMs < 5_000, "cycle must not wait past its deadline, took " + elapsedMs + " ms");
+            assertEquals(2, results.size());
+            assertEquals(ErrorCategory.TIMEOUT, results.get(0).errorReply().category());
+            assertTrue(results.get(1).isSuccess());
+            assertEquals("done-fast", results.get(1).reply().data());
+        } finally {
+            hold.countDown();
+        }
+    }
+
+    @Test
+    void deadlineTimeoutSignalsCancellationToUnfinishedHandler() throws Exception {
+        var sawCancel = new CountDownLatch(1);
+        var executor = executor((ctx, in) -> {
+            while (!ctx.cancellation().isCancelled()) {
+                Thread.onSpinWait();
+            }
+            sawCancel.countDown();
+            return "x";
+        }, Duration.ofSeconds(60));
+
+        var results = executor.executeCycle(List.of(req("a", 1, "k", "x")), Duration.ofMillis(100));
+
+        assertEquals(ErrorCategory.TIMEOUT, results.get(0).errorReply().category());
+        assertTrue(sawCancel.await(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void everyRequestGetsExactlyOneResultInInputOrder() {
+        var executor = executor((ctx, in) -> {
+            if (in.equals("bad")) {
+                throw new RuntimeException("x");
+            }
+            return in;
+        }, TIMEOUT);
+        var requests = List.of(req("a", 1, "k1", "a"), req("a", 2, "k2", "bad"), req("b", 3, "k3", "c"));
+
+        var results = executor.executeCycle(requests, LONG_DEADLINE);
+
+        assertEquals(3, results.size());
+        for (int i = 0; i < 3; i++) {
+            assertEquals(requests.get(i), results.get(i).request());
+            assertTrue(results.get(i).isSuccess() ^ results.get(i).errorReply() != null);
+        }
+    }
+
+    @Test
+    void handlerReceivesIdempotencyKeyAndContextFields() {
+        var seen = new ConcurrentHashMap<String, RequestContext<String>>();
+        var executor = executor((ctx, in) -> {
+            seen.put(in, ctx);
+            return in;
+        }, TIMEOUT);
+
+        executor.executeCycle(List.of(req("lane-x", 42, "key-1", "p")), LONG_DEADLINE);
+
+        var ctx = seen.get("p");
+        assertEquals("key-1", ctx.requestKey());
+        assertEquals("corr-42", ctx.correlationId());
+        assertEquals(IdempotencyKey.of("lane-x", 3, 42), ctx.idempotencyKey());
+        assertEquals("lane-x", ctx.lane());
+        assertEquals(1, ctx.headers().get("h").length);
+        assertFalse(ctx.cancellation().isCancelled());
+    }
+
+    @Test
+    void timeoutErrorReplyCarriesNoHandlerOrPayloadText() {
+        var executor = executor((ctx, in) -> {
+            try {
+                new CountDownLatch(1).await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(SECRET);
+            }
+            return in;
+        }, TIMEOUT);
+
+        var results = executor.executeCycle(List.of(req("a", 1, "k", SECRET)), LONG_DEADLINE);
+
+        assertEquals(ErrorCategory.TIMEOUT, results.get(0).errorReply().category());
+        assertFalse(results.get(0).errorReply().toString().contains(SECRET));
+    }
+}
