@@ -19,7 +19,7 @@
 | T12 | Add commit retry, destination pause and resume | app | <TBD lead> | M | T7, T11 | done |
 | T13 | Implement the Cycle loop that ties intake, execution and commit together | app | <TBD lead> | M | T7, T8, T10, T12 | done |
 | T14 | Implement the Micrometer WorkerMetrics adapter | infra | <TBD lead> | M | T1, T7 | done |
-| T15 | Wire the Spring Boot auto-configuration and startup permission check | wiring | <TBD lead> | M | T3, T4, T5, T6, T13, T14 | todo |
+| T15 | Wire the Spring Boot auto-configuration and startup permission check | wiring | <TBD lead> | M | T3, T4, T5, T6, T13, T14 | done |
 | T16 | Add the failure-scenario test suite | tests | <TBD lead> | L | T15 | todo |
 | T17 | Add rollout, weight-accuracy and throughput tests | tests | <TBD lead> | L | T15 | todo |
 | T18 | Write the starter guide and operator runbook | docs | <TBD lead> | M | T15 | todo |

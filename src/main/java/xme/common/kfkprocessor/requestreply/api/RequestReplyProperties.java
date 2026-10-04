@@ -22,6 +22,19 @@ public class RequestReplyProperties {
         public void setWeight(double weight) { this.weight = weight; }
     }
 
+    public static class AllowanceStore {
+        private String redisUri;
+
+        public String getRedisUri() { return redisUri; }
+        public void setRedisUri(String v) { this.redisUri = v; }
+    }
+
+    private boolean autoStart = true;
+    private String groupId;
+    private long maxPayloadBytes = 1_048_576;
+    private int drawPerRound = 100;
+    private Duration probeInterval = Duration.ofSeconds(5);
+    private AllowanceStore allowanceStore = new AllowanceStore();
     private String workerIdentity;
     private String replyDestination;
     private long rateBudgetPerSecond;
@@ -42,6 +55,22 @@ public class RequestReplyProperties {
     public void setRateBudgetPerSecond(long v) { this.rateBudgetPerSecond = v; }
     public List<Lane> getLanes() { return lanes; }
     public void setLanes(List<Lane> v) { this.lanes = v; }
+    public boolean isAutoStart() { return autoStart; }
+    public void setAutoStart(boolean v) { this.autoStart = v; }
+    /** Explicit group id, else {@code request-reply-<reply-destination>}. */
+    public String getGroupId() { return groupId != null ? groupId : "request-reply-" + replyDestination; }
+    public void setGroupId(String v) { this.groupId = v; }
+    public long getMaxPayloadBytes() { return maxPayloadBytes; }
+    public void setMaxPayloadBytes(long v) { this.maxPayloadBytes = v; }
+    public int getDrawPerRound() { return drawPerRound; }
+    public void setDrawPerRound(int v) { this.drawPerRound = v; }
+    public Duration getProbeInterval() { return probeInterval; }
+    public void setProbeInterval(Duration v) { this.probeInterval = v; }
+    public AllowanceStore getAllowanceStore() { return allowanceStore; }
+    public void setAllowanceStore(AllowanceStore v) { this.allowanceStore = v; }
+    /** Contract name (public-api.md section 3) of {@link #getMinLaneSharePercent()}. */
+    public Integer getMinLaneShare() { return minLaneSharePercent; }
+    public void setMinLaneShare(Integer v) { this.minLaneSharePercent = v; }
     public Integer getMinLaneSharePercent() { return minLaneSharePercent; }
     public void setMinLaneSharePercent(Integer v) { this.minLaneSharePercent = v; }
     public Duration getHandlerTimeout() { return handlerTimeout; }

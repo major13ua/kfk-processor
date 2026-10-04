@@ -72,7 +72,15 @@ An Error Reply carries category, correlation id and Request Key only. No excepti
 | `commit-retry-attempts` | int | 3 | retries same results, no Handler re-run | ADR-0007 |
 | `identity-window` | duration | 45s | provisional | AC-14, ADR-0005 |
 | `stall-threshold` | duration | 60s | provisional; false stalls if commit window ≥ 75s | AC-17 |
-| `allowance-store.*` | adapter | none | first adapter Redis-compatible, behind the `AllowanceStore` port | ADR-0003 |
+| `allowance-store.*` | adapter | none | first adapter Redis-compatible, behind the `AllowanceStore` port; `allowance-store.redis-uri` for the default adapter | ADR-0003 |
+| `enabled` | boolean | true | `false` registers nothing (no Handler required) | AC-01 |
+| `auto-start` | boolean | true | start the Cycle loop with the application context | AC-01 |
+| `group-id` | string | `request-reply-<reply-destination>` | consumer group of the worker group | ADR-0005 |
+| `max-payload-bytes` | long | 1048576 | larger requests are answered at once with an Error Reply | AC-10b |
+| `draw-per-round` | int | 100 | allowance units drawn per intake round | ADR-0003 |
+| `probe-interval` | duration | 5s | interval of reply-destination and allowance-store probes while paused | AC-08b, AC-09, AC-18 |
+
+Kafka brokers come from `spring.kafka.bootstrap-servers`. Beans `RequestLanes`, `ReplySink`, `AllowanceStore` and `DestinationProbe` replace the defaults; a `Consumer<CommitRetry.Alert>` bean named `requestReplyAlertListener` replaces the default error log of configuration faults.
 
 Startup validation (flow 4) fails with a plain-language message naming the conflicting values. Error codes, neutral `module.error_name`:
 

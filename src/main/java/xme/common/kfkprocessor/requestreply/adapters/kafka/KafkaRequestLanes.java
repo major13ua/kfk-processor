@@ -33,6 +33,8 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
 
     static final String CORRELATION_ID = "correlation_id";
     static final String REQUEST_KEY = "request_key";
+    /** Synthetic header (epoch millis of the Kafka record), the consistency-lag fallback when created_at is absent. */
+    public static final String RECORD_TIMESTAMP = "record_timestamp";
     private static final Duration POLL_TIMEOUT = Duration.ofMillis(100);
 
     private final KafkaConsumer<byte[], byte[]> consumer;
@@ -83,6 +85,7 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         for (Header h : record.headers()) {
             headers.put(h.key(), h.value());
         }
+        headers.put(RECORD_TIMESTAMP, Long.toString(record.timestamp()).getBytes(StandardCharsets.UTF_8));
         byte[] corr = headers.get(CORRELATION_ID);
         byte[] key = headers.get(REQUEST_KEY);
         return new IncomingRequest(
