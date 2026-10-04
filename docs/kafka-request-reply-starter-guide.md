@@ -1,0 +1,167 @@
+# Kafka request-reply starter: guide and operator runbook
+
+For Handler Owners, Requesters and Operators. Source of truth: the code in `src/main/java/xme/common/kfkprocessor/requestreply`, then [public-api.md](features/kafka-request-reply/contracts/public-api.md), [events.md](features/kafka-request-reply/contracts/events.md), [spec.md](features/kafka-request-reply/spec.md) and [sad.md](features/kafka-request-reply/sad.md).
+
+Status of names: wire names (headers, categories), metric names and some property defaults are proposals until the Tech Lead closes spec §8 Q5 ("OQ-1" in the contracts). Numbers marked provisional are not decided, see [Open points](#open-points).
+
+## 1. What the starter does
+
+You supply one Handler bean and `xme.request-reply.*` configuration. The starter consumes the request lanes, enforces one global Rate Budget before accepting requests, splits it across Priority Lanes by Priority Weight, runs Handlers in parallel under a per-request timeout and a bounded Cycle, and commits replies together with the request positions in one Kafka transaction. Every accepted request ends in one committed reply or Error Reply. The starter never re-runs a failed or timed-out Handler.
+
+Build and test locally:
+
+```
+./gradlew build       # compile, lint, unit and integration tests (Docker needed for Testcontainers tests)
+./gradlew loadTest    # slow throughput run, tagged "load", excluded from the default test task
+```
+
+`loadTest` reports the provisional throughput target and never fails the build on a miss (see [Known behaviours](#6-known-behaviours)). Options: `-Dload.target`, `-Dload.seconds`, `-Dload.workers`, `-Dload.handler-ms`, `-Dload.hot-percent`, `-Dload.phases`.
+
+## 2. Handler contract
+
+```java
+@Component
+class MyHandler implements RequestReplyHandler<String, String, String> {
+    public String handle(RequestContext<String> ctx, String request) throws Exception { ... }
+}
+```
+
+- Exactly one `RequestReplyHandler` bean per worker. None or several: startup refuses (`request_reply.config.handler_missing`).
+- In the current auto-configuration the request payload is decoded as a UTF-8 `String` and the reply body is `String.valueOf(result)` encoded as UTF-8. Handle serialization of structured data yourself.
+- `RequestContext` gives: `requestKey`, `correlationId`, `idempotencyKey`, `lane`, read-only `headers` (includes a synthetic `record_timestamp`, epoch millis), `cancellation`.
+- Throwing any exception produces an Error Reply with category `failure`. The exception text is never sent to the Requester, and payload content is never logged by the starter.
+- Same Request Key in one lane: Handlers run one after another in arrival order. Different keys run in parallel on virtual threads. Order across lanes is not guaranteed.
+- Handlers should be I/O-bound. CPU-heavy work is out of scope.
+
+### Idempotency Key, cancellation and at-least-once (read together)
+
+**At-least-once.** Handler side effects cannot join the reply transaction. If a worker crashes after a Handler ran but before the Cycle commits, the request is delivered again and the Handler runs again. Replies themselves are committed once.
+
+**Idempotency Key.** `idempotencyKey` is `lane:partition:position` of the request. It is identical on every re-execution of the same request, so use it to make repeated execution harmless. It identifies the attempt, not the business operation. If a Requester times out and sends the business operation again, that is a new request with a new Idempotency Key. Deduplicate business retries on your own business identifier (for example an order or payment id), not on the Idempotency Key.
+
+**Cooperative cancellation (AC-07).** The timeout starts when the Handler is dispatched (default 30 s, provisional) and is also bounded by the Cycle deadline. When it elapses the Requester gets an Error Reply with category `timeout`, `cancellation.isCancelled()` becomes true, and the Cycle is not delayed. The starter does not interrupt your code: a Handler that ignores the signal may still finish its side effects after the Requester already received the timeout. Poll `isCancelled()` or call `throwIfCancelled()` between steps, and make side effects safe to complete late (use the Idempotency Key and a business identifier). A late result is discarded.
+
+**No automatic retry.** The starter never re-runs a failed or timed-out Handler. The Requester decides whether to retry. There is no dead-letter topic by design.
+
+## 3. Requester rules
+
+1. **Read committed replies only.** Set the consumer `isolation.level=read_committed`. Replies are written inside the Cycle transaction, so a reader that sees uncommitted data may see replies of abandoned commits. A stuck commit delays replies for everyone up to the commit window (60 s, provisional).
+2. **Send same-key requests to one lane.** Ordering is guaranteed per Request Key within a lane only. A low-share lane can deliver an older request in a later Cycle than a newer one on another lane.
+3. **Send the required fields.** Currently as Kafka record headers (open, OQ-1, may move to the body):
+   - `correlation_id` (required, opaque, set by the Requester)
+   - `request_key` (required)
+   - `created_at` (optional, ISO-8601, source of Consistency Lag; if absent or unparsable, the Kafka record timestamp is used)
+   - record value: the payload for the Handler.
+   A request without `correlation_id` or `request_key` (or without a payload) is answered at once with an Error Reply `failure` and uses no Rate Budget allowance. A payload over `max-payload-bytes` (default 1 MiB) is answered the same way.
+4. **Read the reply destination and filter by `correlation_id`.** There is one fixed reply destination. Replies and Error Replies carry `correlation_id` and `request_key` echoed unchanged as record headers; the reply record has no key. Do not rely on order across requests.
+5. **Handle Error Replies.** The body is JSON: `{"correlation_id":"...","request_key":"...","category":"failure|timeout|undeliverable"}`. No message, stack trace or payload.
+
+| Category | Meaning |
+|---|---|
+| `failure` | The Handler threw, or the request was malformed or oversized |
+| `timeout` | Per-request timeout or Cycle deadline elapsed |
+| `undeliverable` | The reply was too large, could not be encoded, or was rejected on send |
+
+6. **Retry is yours.** A timeout does not mean the work did not happen (see cooperative cancellation). Retry with your own business identifier so the Handler Owner can deduplicate.
+
+## 4. Configuration
+
+All under `xme.request-reply`. Brokers come from `spring.kafka.bootstrap-servers` (default `localhost:9092` if unset in the starter's binder). Defaults below are from `RequestReplyProperties`; items marked provisional are not decided.
+
+| Property | Default | Notes |
+|---|---|---|
+| `enabled` | `true` | `false` registers nothing, no Handler required |
+| `auto-start` | `true` | start the Cycle loop with the application context |
+| `worker-identity` | none | required, explicit, unique and stable per replica |
+| `reply-destination` | none | required, one fixed destination |
+| `group-id` | `request-reply-<reply-destination>` | consumer group of the worker group |
+| `rate-budget-per-second` | none | required, > 0 |
+| `lanes[].name`, `lanes[].source`, `lanes[].weight` | none | weight must be > 0 |
+| `min-lane-share` | `5` (percent) | lanes below it are raised, others scaled down; effective shares are logged at start |
+| `draw-per-round` | `100` | allowance units drawn per intake round |
+| `max-payload-bytes` | `1048576` | larger requests get an Error Reply at once |
+| `handler-timeout` | `30s` | provisional |
+| `cycle-deadline` | 80% of `commit-window` | must be at most 80% of `commit-window`; `handler-timeout` must fit inside it |
+| `commit-window` | `60s` | provisional, transaction timeout |
+| `commit-retry-attempts` | `3` | retries the same results, Handlers are not re-run |
+| `identity-window` | `45s` | provisional, used as the consumer session timeout |
+| `stall-threshold` | `60s` | provisional; false stalls if `commit-window` is 75 s or more |
+| `probe-interval` | `5s` | probe cadence for the reply destination and allowance store while paused |
+| `allowance-store.redis-uri` | none | required unless you provide your own `AllowanceStore` bean |
+
+Replaceable beans: `RequestLanes`, `ReplySink`, `AllowanceStore`, `DestinationProbe`, `WorkerMetrics`, and a `Consumer<CommitRetry.Alert>` bean named `requestReplyAlertListener` (default: logs at ERROR). The Rate Budget counter is stored in Redis under `xme:request-reply:<group-id>:budget`.
+
+Startup refusals (message names the conflicting values, code in brackets): `request_reply.config.handler_missing`, `identity_missing`, `weight_not_positive`, `timeout_exceeds_cycle_deadline`, `cycle_deadline_exceeds_commit_window_share`, and `request_reply.config.allowance_store_missing` (no Redis URI and no `AllowanceStore` bean; present in the code, not yet listed in public-api.md).
+
+## 5. Operator runbook
+
+### Deployment rules
+
+- **Rate Budget and Priority Weights must be identical in every worker of a group.** The budget is shared through the allowance store, and each worker computes lane shares locally from its own weights. Change them only by a rollout of all workers, never on a subset. The starter cannot detect a mismatch.
+- **Stable identity per replica.** `worker-identity` is the Kafka static group member id. It must be unique per replica and the same after a restart (for example the StatefulSet pod name). A restart that returns within `identity-window` (45 s, provisional) keeps its lanes and causes no reassignment.
+- **Rolling deploy:** restart one worker at a time, each returning with its own identity.
+- **Delivery requirements:** Requesters read committed replies only (section 3).
+
+### States and alerts
+
+Metric `requestreply.state` is a gauge with ordinal values `0 = running` (includes idle), `1 = paused`, `2 = stalled`. Pause takes precedence and suppresses stall.
+
+| State | Meaning | Operator action |
+|---|---|---|
+| running | Intake and Cycles are working, or nothing is pending (idle raises no stall) | none |
+| paused (limiter) | Allowance store unreachable. Intake failed closed, worker stays in its group, resumes by itself when the store returns, without exceeding the budget. Fault id `request_reply.rate_budget_store.unavailable` is defined in public-api.md but not emitted by the code; this pause shows only in `requestreply.state` | restore the Redis-compatible store |
+| paused (destination) | Commit failed after `commit-retry-attempts`, or the reply destination is unavailable. Results are held in memory, the worker probes every `probe-interval` and re-commits in a new transaction. Alert fault id `request_reply.reply_destination.unavailable` | fix the broker or destination |
+| paused (permission) | No write permission on the reply destination, at start or later. At start the worker keeps its group membership with every lane paused and starts by itself once the probe succeeds. Alert fault id `request_reply.reply_destination.permission_denied` | grant write permission (ACL) |
+| stalled | Work pending or a Cycle open and no commit for longer than `stall-threshold` (60 s, provisional) | check Handlers and commit, see below |
+
+Alert wiring: the commit and permission pauses call the `requestReplyAlertListener` bean with the pause reason and fault id. Register your own bean to route them to paging. Limiter pause and stall are visible through `requestreply.state` only.
+
+If the worker pauses while results are held in memory and then crashes, those Handlers run again after restart (at-least-once).
+
+### Stall
+
+Likely causes: slow Handlers holding a Cycle up to the Cycle deadline, a slow commit, or a commit window of 75 s or more against the 60 s threshold (false stall). Check `requestreply.cycle.duration`, `requestreply.handler.timeout` and `requestreply.commit.attempts`.
+
+### Stranded lane
+
+A worker that is lost or scaled down and does not return keeps its partitions until the identity window ends (45 s, provisional); those lanes are not consumed during that time. After the window the broker reassigns them. If a worker stays gone: confirm the replica is really removed, wait for the window, and watch `requestreply.group.membership.changes` and Consistency Lag for the affected lanes. Scaling down permanently should be done by removing replicas one at a time. A dedicated stranded-lane alert is planned in the SAD but is not implemented in the code, see [Open points](#open-points).
+
+### Metrics (proposals until spec §8 Q5 closes)
+
+Tags are limited to `lane` and `category`.
+
+| Meter | Meaning |
+|---|---|
+| `requestreply.accepted` (tag `lane`) | requests taken at intake, matches the limiter |
+| `requestreply.consistency.lag` (tag `lane`) | timer, request creation to reply commit |
+| `requestreply.consistency.lag.implausible` (tag `lane`) | counter of excluded samples (negative or over one day) |
+| `requestreply.state` | gauge, see above |
+| `requestreply.errorreply` (tag `category`) | counter of Error Replies |
+| `requestreply.handler.timeout` | counter |
+| `requestreply.commit.attempts` | counter |
+| `requestreply.cycle.duration` | timer |
+| `requestreply.group.membership.changes` | counter of partition assign and revoke events |
+
+`requestreply.consistency.lag.implausible` is in the code but not in the public-api.md meter table.
+
+## 6. Known behaviours
+
+- **Rate Budget burst cap is budget/20.** The shared counter's burst capacity is `max(1, budget / 20)` (5%). This keeps any sliding second near budget x 1.05. A consequence: with slow Cycles, throughput can fall below the configured budget, because unused allowance cannot accumulate beyond the cap. Budgets under 20 keep a minimum capacity of 1.
+- **Rate Budget accuracy NFR is x1.10.** Accepted rate must stay at or under budget x 1.10 in any sliding 1 s window. The Tech Lead widened it from x1.05 to x1.10 (commit 23a544b). Measured peaks went up to about x1.075. The value is still labelled provisional in spec §6.
+- **Hot-key ordering throttles one partition.** Requests with the same Request Key run one after another, so a hot key limits parallelism. The `loadTest` hot-key phase measured 863 requests/s against the provisional 2,000 requests/s target (commit 827379a: "reported, not hidden"). The "3000/s" figure quoted in the task request is not found in the code, tests or docs and is not used here.
+- **Throughput target is reported, not asserted.** `loadTest` prints a MISSED line when the provisional target is not met.
+- **Cross-lane ordering is not guaranteed** (section 3, rule 2).
+- **Head-of-line delay.** One slow request can hold its Cycle for up to the Cycle deadline, including requests of high-weight lanes.
+- **Priority is a share of the Rate Budget**, not strict precedence. Idle lanes hand their share to busy lanes.
+
+## Open points
+
+Linked, not decided:
+
+- Wire format and names: record headers versus body for `correlation_id`, `request_key`, `created_at`, error categories, meter names: spec §8 Q5, OQ-1 in [events.md](features/kafka-request-reply/contracts/events.md). Schema registry not decided.
+- Provisional numbers (2,000 requests/s, accuracy tolerance, 30 s timeout, 80% Cycle deadline, 60 s commit window, 45 s identity window, 60 s stall threshold): spec §8 Q2, [spec.md](features/kafka-request-reply/spec.md) §6.
+- Committed-reads-only requirement and commit window: spec §8 Q6.
+- Stranded-lane alert and runbook sufficiency: spec §8 Q7.
+- Per-key ordering versus throughput: spec §8, [sad.md](features/kafka-request-reply/sad.md) §11.
+- Consistency Lag p95 target and baseline: TBD, spec §8 (last item). The metric exists; no target is set.
+- Tightening of spec AC-07c from "arrival order" to "within a lane": pending per sad.md §11.
