@@ -15,7 +15,7 @@
 | T8 | Implement intake: reserve allowance, weighted fetch, return unused, fail closed | app | <TBD lead> | L | T1, T2, T7 | done |
 | T9 | Implement Handler execution: virtual threads, timeout, cancellation, Error Replies | app | <TBD lead> | L | T1 | done |
 | T10 | Add per-Request-Key ordering inside a lane | app | <TBD lead> | S | T9 | done |
-| T11 | Assemble the Cycle commit and turn undeliverable replies into Error Replies | app | <TBD lead> | M | T1 | todo |
+| T11 | Assemble the Cycle commit and turn undeliverable replies into Error Replies | app | <TBD lead> | M | T1 | done |
 | T12 | Add commit retry, destination pause and resume | app | <TBD lead> | M | T7, T11 | todo |
 | T13 | Implement the Cycle loop that ties intake, execution and commit together | app | <TBD lead> | M | T7, T8, T10, T12 | todo |
 | T14 | Implement the Micrometer WorkerMetrics adapter | infra | <TBD lead> | M | T1, T7 | todo |

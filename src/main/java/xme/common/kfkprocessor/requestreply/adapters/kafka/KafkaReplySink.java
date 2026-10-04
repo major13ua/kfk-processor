@@ -30,7 +30,8 @@ import xme.common.kfkprocessor.requestreply.ports.ReplySink;
 /**
  * Kafka adapter of {@link ReplySink}: one transaction per commit holding the replies and the next request
  * positions (ADR-0002). The transactional id derives from the worker identity (ADR-0005) and the transaction
- * timeout equals the commit window. A failure specific to one reply is reported, never aborts the transaction.
+ * timeout equals the commit window. A failure specific to one reply is reported, never aborts the transaction;
+ * when the reply has a fallback Error Reply, that is sent in its place in the same transaction.
  * A producer that failed fatally (for example fenced by a newer instance) is discarded and re-created on the
  * next commit.
  */
@@ -105,11 +106,12 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
             p = producer();
             p.beginTransaction();
             began = true;
-            List<Exception> errors = send(p, replies);
+            boolean[] substituted = new boolean[replies.size()];
+            List<Exception> errors = send(p, replies, substituted);
             for (int i = 0; i < replies.size(); i++) {
                 Exception e = errors.get(i);
                 if (e != null) {
-                    failures.add(failure(replies.get(i), perReply(e)));
+                    failures.add(failure(replies.get(i), perReply(e), substituted[i]));
                 }
             }
             p.sendOffsetsToTransaction(nextPositions(replies), group);
@@ -124,48 +126,79 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         }
     }
 
-    /** Sends all replies; returns the per-reply send error (null = sent). Destination faults are thrown. */
-    private List<Exception> send(Producer<byte[], byte[]> p, List<ReplyRecord> replies) {
-        Exception[] errors = new Exception[replies.size()];
-        List<Exception> result = new ArrayList<>();
-        for (int i = 0; i < replies.size(); i++) {
-            ReplyRecord r = replies.get(i);
-            if (r.value() == null) {
-                errors[i] = new IllegalArgumentException("reply cannot be encoded");
-                continue;
-            }
-            ProducerRecord<byte[], byte[]> rec = record(r);
-            if (exceedsClientLimit(rec)) {
-                // the client would fail the whole transaction on an oversized record, so it is never sent
-                errors[i] = new RecordTooLargeException("reply exceeds max.request.size");
-                continue;
-            }
-            int index = i;
-            try {
-                p.send(rec, (metadata, e) -> {
-                    if (e != null) {
-                        errors[index] = e;
-                    }
-                });
-            } catch (RuntimeException e) {
-                errors[i] = e;
-            }
-            if (errors[i] != null && perReply(errors[i]) == null) {
-                throw destinationFault(errors[i]);
-            }
+    /**
+     * Sends all replies; returns the per-reply send error (null = sent or substituted). A reply that fails for a
+     * per-reply reason and has a fallback is replaced by the fallback in the same transaction; its entry in
+     * {@code substituted} is set. Destination faults are thrown.
+     */
+    private List<Exception> send(Producer<byte[], byte[]> p, List<ReplyRecord> replies, boolean[] substituted) {
+        int n = replies.size();
+        Exception[] errors = new Exception[n];
+        for (int i = 0; i < n; i++) {
+            sendOne(p, errors, i, replies.get(i).value(), replies.get(i));
         }
         p.flush();
-        for (Exception e : errors) {
-            if (e != null && perReply(e) == null) {
-                throw destinationFault(e);
+        checkFaults(errors);
+        Exception[] primary = errors.clone();
+        boolean any = false;
+        for (int i = 0; i < n; i++) {
+            if (primary[i] != null && replies.get(i).fallback() != null) {
+                errors[i] = null;
+                substituted[i] = true;
+                sendOne(p, errors, i, replies.get(i).fallback(), replies.get(i));
+                any = true;
             }
-            result.add(e);
+        }
+        if (any) {
+            p.flush();
+            checkFaults(errors);
+        }
+        List<Exception> result = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            if (substituted[i] && errors[i] != null) {
+                substituted[i] = false; // the fallback failed too: report the original failure
+                errors[i] = primary[i];
+            }
+            result.add(errors[i] != null ? errors[i] : (substituted[i] ? primary[i] : null));
         }
         return result;
     }
 
-    private ProducerRecord<byte[], byte[]> record(ReplyRecord r) {
-        ProducerRecord<byte[], byte[]> rec = new ProducerRecord<>(replyTopic, null, r.value());
+    private void sendOne(Producer<byte[], byte[]> p, Exception[] errors, int i, byte[] value, ReplyRecord r) {
+        if (value == null) {
+            errors[i] = new IllegalArgumentException("reply cannot be encoded");
+            return;
+        }
+        ProducerRecord<byte[], byte[]> rec = record(r, value);
+        if (exceedsClientLimit(rec)) {
+            // the client would fail the whole transaction on an oversized record, so it is never sent
+            errors[i] = new RecordTooLargeException("reply exceeds max.request.size");
+            return;
+        }
+        try {
+            p.send(rec, (metadata, e) -> {
+                if (e != null) {
+                    errors[i] = e;
+                }
+            });
+        } catch (RuntimeException e) {
+            errors[i] = e;
+        }
+        if (errors[i] != null && perReply(errors[i]) == null) {
+            throw destinationFault(errors[i]);
+        }
+    }
+
+    private static void checkFaults(Exception[] errors) {
+        for (Exception e : errors) {
+            if (e != null && perReply(e) == null) {
+                throw destinationFault(e);
+            }
+        }
+    }
+
+    private ProducerRecord<byte[], byte[]> record(ReplyRecord r, byte[] value) {
+        ProducerRecord<byte[], byte[]> rec = new ProducerRecord<>(replyTopic, null, value);
         rec.headers().add(new RecordHeader(CORRELATION_ID, utf8(r.correlationId())));
         rec.headers().add(new RecordHeader(REQUEST_KEY, keyBytes(r.requestKey())));
         return rec;
@@ -208,8 +241,8 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         return null;
     }
 
-    private static ReplyFailure failure(ReplyRecord r, Reason reason) {
-        return new ReplyFailure(r.lane(), r.partition(), r.position(), r.correlationId(), reason);
+    private static ReplyFailure failure(ReplyRecord r, Reason reason, boolean substituted) {
+        return new ReplyFailure(r.lane(), r.partition(), r.position(), r.correlationId(), reason, substituted);
     }
 
     private static ReplyDestinationFault destinationFault(Throwable e) {

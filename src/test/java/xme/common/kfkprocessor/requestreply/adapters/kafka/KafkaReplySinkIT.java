@@ -193,4 +193,46 @@ class KafkaReplySinkIT {
         assertEquals(List.of("ok-1", "ok-2"), committedReplies(env, Duration.ofSeconds(5)).stream().sorted().toList());
         assertEquals(3L, groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset());
     }
+
+    /** correlation id to value of every committed reply record a read_committed Requester sees. */
+    private static List<String> committedRepliesWithValues(Env env, Duration observe) {
+        var p = new Properties();
+        p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
+        p.put(ConsumerConfig.GROUP_ID_CONFIG, "reader-" + UUID.randomUUID());
+        p.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        p.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+        p.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+        var seen = new ArrayList<String>();
+        try (var c = new KafkaConsumer<byte[], byte[]>(p)) {
+            c.subscribe(List.of(env.replies));
+            long end = System.nanoTime() + observe.toNanos();
+            while (System.nanoTime() < end) {
+                for (ConsumerRecord<byte[], byte[]> r : c.poll(Duration.ofMillis(200))) {
+                    seen.add(new String(r.headers().lastHeader("correlation_id").value(), StandardCharsets.UTF_8)
+                            + "=" + new String(r.value(), StandardCharsets.UTF_8));
+                }
+            }
+        }
+        return seen;
+    }
+
+    // AC-08 (the undeliverable Error Reply replaces the too large reply in the same transaction)
+    @Test
+    void tooLargeReplyIsReplacedByItsUndeliverableErrorReplyInTheSameTransaction() throws Exception {
+        var env = Env.create();
+        CommitResult r;
+        try (var sink = env.sink()) {
+            r = sink.commit(List.of(
+                    env.reply(0, 0, "ok-1", b("a")),
+                    new ReplyRecord("high", 0, 1, "big", "key-big", new byte[3 * 1024 * 1024], false,
+                            b("undeliverable")),
+                    env.reply(0, 2, "ok-2", b("b"))));
+        }
+        assertEquals(1, r.failures().size());
+        assertTrue(r.failures().get(0).substituted());
+        assertEquals(List.of("big=undeliverable", "ok-1=a", "ok-2=b"),
+                committedRepliesWithValues(env, Duration.ofSeconds(5)).stream().sorted().toList());
+        assertEquals(3L, groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset());
+    }
 }

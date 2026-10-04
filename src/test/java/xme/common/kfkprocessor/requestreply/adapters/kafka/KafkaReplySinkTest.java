@@ -177,4 +177,91 @@ class KafkaReplySinkTest {
                 () -> sink(p).commit(List.of(reply("high", 0, 1, "c", b("a")))));
         assertFalse(p.transactionCommitted());
     }
+
+    private static ReplyRecord withFallback(String lane, int partition, long position, String corr, byte[] value,
+            byte[] fallback) {
+        return new ReplyRecord(lane, partition, position, corr, "key-" + corr, value, false, fallback);
+    }
+
+    private static String corr(ProducerRecord<byte[], byte[]> r) {
+        return new String(r.headers().lastHeader("correlation_id").value(), StandardCharsets.UTF_8);
+    }
+
+    // AC-08 (too large primary: the fallback goes out in the same transaction, one record for that request)
+    @Test
+    void tooLargeReplyIsSubstitutedByItsFallbackInTheSameTransaction() {
+        var p = new Producer();
+        p.fault = r -> new String(r.value(), StandardCharsets.UTF_8).equals("huge")
+                ? new RecordTooLargeException("too large") : null;
+
+        CommitResult result = sink(p).commit(List.of(
+                reply("high", 0, 1, "ok-1", b("a")),
+                withFallback("high", 0, 2, "big", b("huge"), b("undeliverable-big")),
+                reply("high", 0, 3, "ok-2", b("b"))));
+
+        assertEquals(1, result.failures().size());
+        assertEquals("big", result.failures().get(0).correlationId());
+        assertEquals(Reason.TOO_LARGE, result.failures().get(0).reason());
+        assertTrue(result.failures().get(0).substituted());
+        assertEquals(3, p.history().size(), "exactly one record per request");
+        var big = p.history().stream().filter(r -> corr(r).equals("big")).toList();
+        assertEquals(1, big.size());
+        assertEquals("undeliverable-big", new String(big.get(0).value(), StandardCharsets.UTF_8));
+        assertEquals("key-big", new String(big.get(0).headers().lastHeader("request_key").value(), StandardCharsets.UTF_8));
+        assertTrue(p.transactionCommitted());
+        assertFalse(p.transactionAborted());
+        assertEquals(1, p.consumerGroupOffsetsHistory().size());
+        assertEquals(4L, p.consumerGroupOffsetsHistory().get(0).get("grp").get(new TopicPartition("src-high", 0)).offset());
+    }
+
+    // AC-08 (client-side limit, nothing sent for the primary)
+    @Test
+    void unencodableReplyIsSubstitutedByItsFallback() {
+        var p = new Producer();
+        CommitResult result = sink(p).commit(List.of(
+                withFallback("high", 0, 2, "bad", null, b("undeliverable-bad"))));
+
+        assertEquals(Reason.UNENCODABLE, result.failures().get(0).reason());
+        assertTrue(result.failures().get(0).substituted());
+        assertEquals(1, p.history().size());
+        assertEquals("undeliverable-bad", new String(p.history().get(0).value(), StandardCharsets.UTF_8));
+        assertTrue(p.transactionCommitted());
+    }
+
+    // AC-08
+    @Test
+    void rejectedReplyIsSubstitutedByItsFallback() {
+        var p = new Producer();
+        p.fault = r -> new String(r.value(), StandardCharsets.UTF_8).equals("bad")
+                ? new org.apache.kafka.common.errors.CorruptRecordException("rejected") : null;
+        CommitResult result = sink(p).commit(List.of(
+                withFallback("high", 0, 2, "rej", b("bad"), b("undeliverable-rej"))));
+
+        assertEquals(Reason.REJECTED, result.failures().get(0).reason());
+        assertTrue(result.failures().get(0).substituted());
+        assertEquals(1, p.history().size());
+        assertEquals("undeliverable-rej", new String(p.history().get(0).value(), StandardCharsets.UTF_8));
+    }
+
+    // AC-08 (a reply that sends fine never triggers its fallback)
+    @Test
+    void fallbackIsNotSentWhenThePrimaryReplyIsDelivered() {
+        var p = new Producer();
+        CommitResult result = sink(p).commit(List.of(
+                withFallback("high", 0, 1, "ok", b("a"), b("undeliverable-ok"))));
+
+        assertTrue(result.failures().isEmpty());
+        assertEquals(1, p.history().size());
+        assertEquals("a", new String(p.history().get(0).value(), StandardCharsets.UTF_8));
+    }
+
+    // AC-08 (without a fallback the old behaviour holds: reported, not substituted)
+    @Test
+    void failureWithoutFallbackIsReportedAsNotSubstituted() {
+        var p = new Producer();
+        CommitResult result = sink(p).commit(List.of(reply("high", 0, 2, "bad", null)));
+
+        assertFalse(result.failures().get(0).substituted());
+        assertEquals(0, p.history().size());
+    }
 }
