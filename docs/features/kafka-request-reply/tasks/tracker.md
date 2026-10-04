@@ -8,7 +8,7 @@
 | T1 | Define public API types, ports and Idempotency Key | domain | <TBD lead> | M | none | done |
 | T2 | Implement lane share calculator (weights, 5% minimum, idle redistribution) | domain | <TBD lead> | M | none | done |
 | T3 | Add configuration properties and startup validation | app | <TBD lead> | M | T1, T2 | done |
-| T4 | Implement the Redis-compatible AllowanceStore adapter | infra | <TBD lead> | L | T1 | todo |
+| T4 | Implement the Redis-compatible AllowanceStore adapter | infra | <TBD lead> | L | T1 | done |
 | T5 | Implement the Kafka RequestLanes adapter with stable worker identity | infra | <TBD lead> | L | T1 | todo |
 | T6 | Implement the transactional Kafka ReplySink | infra | <TBD lead> | M | T1 | todo |
 | T7 | Implement worker pause and stall state machine | app | <TBD lead> | S | T1 | todo |
