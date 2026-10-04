@@ -44,5 +44,25 @@ dependencies {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags 'load'
+    }
+}
+
+// Slow load/throughput runs (T17): `./gradlew loadTest`; excluded from the default `test` task.
+tasks.register('loadTest', Test) {
+    description = 'Runs only the tests tagged "load" (throughput run against the NFR target).'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'load'
+    }
+    testLogging {
+        showStandardStreams = true
+    }
+    // pass -Dload.target=... -Dload.seconds=... etc. through to the test JVM
+    systemProperties System.properties.findAll { k, v -> k.toString().startsWith('load.') }
+    outputs.upToDateWhen { false }
+    shouldRunAfter tasks.named('test')
 }
