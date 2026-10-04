@@ -1,0 +1,259 @@
+---
+status: Draft
+owner: "Ievgen Chupryna"
+reviewers: ["Tech Lead", "Security Lead"]
+updated_at: "2026-10-04"
+feature_size: "M"
+---
+
+# Spec: kafka-request-reply
+
+> **Glossary:** [CONTEXT](./CONTEXT.md)
+> **Reference module / docs / channels used:** `docs/kafka-request-reply-architecture.md`, `docs/kafka-request-reply-claude-prompt.md` (the source design notes), plus the interview. No other channels.
+
+## 1. Context
+
+XME teams build workers that take requests from a streaming platform, enrich them by calling other services or databases, and send replies back. Each team writes its own consume loop and meets the same problems: bursts of requests flood the downstream services, one slow request delays everything gathered with it, rolling deployments disrupt consumption, and failures produce duplicate or missing replies. The users are Handler Owners (teams that write the business logic) and the Operators who run and watch those workers.
+
+The trigger for doing this now is not yet confirmed: the design notes describe the pain but name no incident, contract or deadline (see §8). What is known: several services need the same worker shape, handlers are I/O-bound calls lasting from about 100 ms to a few seconds, and the target load is thousands of requests per second.
+
+Committed approach: a reusable internal starter where a team supplies only a Handler and configuration. The worker enforces one global Rate Budget before accepting requests, splits it across N Priority Lanes by Priority Weight, runs handlers in parallel under a per-request timeout and a bounded Cycle, answers every accepted request with a reply or an Error Reply, and commits replies together with the request positions so a Requester never sees a duplicate committed reply. Handlers themselves are at-least-once and receive an Idempotency Key. Every Priority Lane is consumed by every worker of the group, its partitions spread across the workers. Requests that share a Request Key run one after another in arrival order, others run in parallel. The worker never retries a failed Handler; the Requester decides whether to retry. Rationale: market research found no library combining cross-worker rate limiting at intake, weighted multi-lane priority, per-request timeouts with error replies and atomic reply commit as a handler-only starter (the closest parallel-processing library is no longer maintained; the framework's own request-reply support covers only the basic reply path), so a custom starter fills a real gap. The adversary review's sharpest failure vector is an undeliverable reply that aborts the shared commit and replays the whole Cycle on every worker, repeating handler side effects; the approach therefore treats undeliverable replies per request, never as a reason to replay. Success is one production service running it plus a second team adopting it by writing only a Handler.
+
+Traceability: decisions fixed in the interview (2026-10-03/04): N configurable lanes with one consumer per lane; weighted-share priority; per-request error replies with batch commit; at-least-once handlers with an Idempotency Key; per-request timeout plus Cycle deadline validated at startup; global Rate Budget with a pluggable shared store (first adapter assumes an already-operated in-memory store), fail closed when it is unavailable; stable-identity deployment only; fixed reply destination with correlation echoed; full custom engine (the thin-layer alternative was declined); acceptance by a failure-scenario test suite.
+
+Decision override: 30 s Handler timeout with a fixed 60 s stall threshold, kept as chosen by the author at critic review (the critic flagged false stall alerts for commit windows of 75 s or more, and a head-of-line delay of up to the Cycle deadline for high-weight lanes). The Tech Lead confirms this knowingly via the open question on provisional numbers in §8.
+
+## 2. Goals
+
+- Accepted requests stay within the configured Rate Budget in total across all workers (within the §6 tolerance), including backlog catch-up and rollouts, so downstream services are protected.
+- A second team can stand up a worker by writing only a Handler and configuration.
+- Every accepted request ends in exactly one committed outcome (reply or Error Reply), and the Operator can observe Consistency Lag and stalls.
+- Workers stay available through rollouts, slow lanes and dependency incidents without group-wide disruption.
+
+## 3. Non-goals
+
+- Exactly-once effects inside Handlers: external services cannot join the reply commit, so Handlers are at-least-once.
+- Per-Requester reply routing in v1: replies go to one fixed destination and Requesters filter by correlation; keeps the worker simple.
+- Support for deployments without stable worker identity: a stable worker identity is required for uninterrupted rollouts; such teams are out of scope.
+- A latency guarantee for high-priority lanes beyond the Cycle bound: priority is a share of the Rate Budget, not strict precedence.
+- A public or open-source library: internal starter only, so no external API-stability promise.
+- CPU-heavy Handlers: the design targets I/O-bound work.
+
+## 4. User stories
+
+### US-01: Run a worker from a Handler
+**As a** Handler Owner
+**I want** to supply only a Handler and configuration
+**So that** I get a working request-reply worker without writing consumption, rate control or commit logic
+
+### US-02: Receive an idempotency key
+**As a** Handler Owner
+**I want** each Handler call to carry an Idempotency Key stable across re-executions
+**So that** I can make repeated execution of my side effects harmless
+
+### US-03: Get a reply with my correlation
+**As a** Requester
+**I want** a reply that carries my correlation identifier, and never two committed replies for one request
+**So that** I can match and trust the answer
+
+### US-04: Get an error reply instead of silence
+**As a** Requester
+**I want** an Error Reply when my request fails or times out
+**So that** I am not left waiting and can decide to retry
+
+### US-05: Cap total request rate
+**As an** Operator
+**I want** one Rate Budget that holds across all workers of a group
+**So that** downstream services are not overloaded, including during backlog catch-up
+
+### US-06: Weight the priority lanes
+**As an** Operator
+**I want** to give each Priority Lane a Priority Weight
+**So that** important traffic gets a larger share without starving the others
+
+### US-07: Roll out without disruption
+**As an** Operator
+**I want** to restart or replace workers one by one without reassigning work across the group
+**So that** deployments do not interrupt consumption
+
+### US-08: See lag and stalls
+**As an** Operator
+**I want** Consistency Lag and a clear stall indicator
+**So that** I can detect trouble even when no replies are being committed
+
+### US-09: Pause safely when limiting fails
+**As an** Operator
+**I want** workers to stop accepting requests when the Rate Budget cannot be enforced
+**So that** an outage of the limiter never turns into an overload of downstream services
+
+## 5. Acceptance criteria
+
+### AC-01 (US-01): happy path
+**Given** a Handler Owner has supplied a Handler and configured the Priority Lanes, the Rate Budget and the reply destination
+**When** the worker group starts and a Requester sends a request
+**Then** the Requester receives the Handler's reply carrying the same correlation identifier as the request
+
+### AC-02 (US-01): invalid configuration
+**Given** a configuration where the per-request timeout does not fit inside the Cycle deadline, or the Cycle deadline exceeds the share of the commit window allowed in §6, or a Priority Weight is not a positive number, or which has no Handler
+**When** a worker starts
+**Then** it refuses to start and tells the Operator in plain language which values conflict
+
+**And** (valid configuration) the worker logs the effective share of each Priority Lane; a lane whose share would fall below the 5% minimum share is raised to it and the other lanes are scaled down
+
+### AC-03 (US-02): happy path
+**Given** a request is delivered to a Handler
+**When** the same request is executed again after a failure or restart
+**Then** the Handler receives the same Idempotency Key as the first time
+
+### AC-04 (US-03): happy path
+**Given** a Requester sent a request with a correlation identifier and a Request Key
+**When** the reply is committed
+**Then** the reply carries the same correlation identifier and Request Key
+
+### AC-05 (US-03): domain invariant
+**Given** a request attempt whose reply was already committed
+**When** a Cycle is repeated after a failure or restart
+**Then** a Requester reading committed replies sees only one reply for that request attempt (a new attempt by the Requester is a new request)
+
+### AC-06 (US-04): error
+**Given** a Handler fails on one request in a Cycle
+**When** the Cycle completes
+**Then** the Requester of that request receives an Error Reply naming the failure category, and the other requests in the same Cycle get their normal replies
+
+### AC-07 (US-04): error
+**Given** a Handler does not finish within the per-request timeout
+**When** the timeout elapses (the timer starts when the Handler is dispatched)
+**Then** the Requester receives an Error Reply for a timeout, the Handler is signalled to cancel (cooperative: a Handler may still finish its side effects, which the starter guide documents next to the Idempotency Key note), and the Cycle is not delayed beyond its deadline
+
+### AC-07b (US-04): error
+**Given** a Handler fails or times out
+**When** the worker handles the failure
+**Then** the Handler is not run again by the worker, and the Requester receives the Error Reply from the first failure
+
+### AC-07c (US-01): domain invariant
+**Given** several requests with the same Request Key are waiting in a Cycle
+**When** the Handlers run
+**Then** those requests run one after another in arrival order, while requests with different Request Keys run in parallel
+
+### AC-08 (US-04): domain invariant
+**Given** a reply cannot be delivered for any reason specific to it (too large, cannot be encoded, rejected on send)
+**When** the worker tries to commit the Cycle
+**Then** the Requester gets an Error Reply instead, the Handlers of that Cycle are not run again, and the other requests in it are unaffected
+
+### AC-08b (US-04): error
+**Given** an Error Reply itself cannot be delivered because the reply destination is unavailable
+**When** the worker tries to commit the Cycle
+**Then** the worker pauses as in AC-09, alerts the Operator, stays in its group, does not run the Handlers of that Cycle again, and resumes automatically when the destination returns
+
+### AC-09 (US-03): authorization
+**Given** the worker has no permission to write to the reply destination
+**When** it starts or a Cycle tries to send replies
+**Then** the worker stops accepting requests, reports a configuration fault to the Operator, loses no request, stays in its group (no lane reassignment) and resumes automatically once the permission is restored, without running the Handlers of a Cycle in progress again
+
+### AC-10 (US-05): happy path
+**Given** several workers share one Rate Budget and a backlog of requests exists
+**When** the group catches up
+**Then** the total number of requests accepted across all workers stays within the Rate Budget in every sliding one-second window, within the tolerance in §6. A request counts as accepted when it is handed to a Handler, taking one unit of allowance at that moment
+
+### AC-10b (US-05): domain invariant
+**Given** more requests are waiting than the Rate Budget allows
+**When** the worker has no allowance left
+**Then** the remaining requests stay unconsumed, get no reply and wait for a later Cycle; requests answered at once with an Error Reply because they are malformed or oversized use no allowance
+
+### AC-11 (US-06): happy path
+**Given** three Priority Lanes with Priority Weights and traffic waiting on all of them
+**When** the group is running at its Rate Budget
+**Then** each lane's share of accepted requests matches its Priority Weight within the tolerance in §6
+
+### AC-12 (US-06): domain invariant
+**Given** a Priority Lane with a Priority Weight and pending requests
+**When** other lanes have heavy traffic
+**Then** that lane still receives at least its minimum share of the Rate Budget (5%, see §8) and its requests keep being served
+
+### AC-13 (US-06): domain invariant
+**Given** a slow Handler on a low-weight lane
+**When** a high-weight lane request is in the same Cycle
+**Then** no request in the Cycle waits longer than the Cycle deadline, and unfinished requests receive Error Replies
+
+### AC-14 (US-07): happy path
+**Given** workers are restarted one by one, each returning with the same identity within the allowed window
+**When** the rollout runs
+**Then** the other workers keep consuming without any reassignment of lanes
+
+### AC-15 (US-07): error
+**Given** a worker starts without an explicitly configured worker identity
+**When** it starts
+**Then** it refuses to start and explains that a stable identity must be configured
+
+### AC-16 (US-08): happy path
+**Given** replies are being committed
+**When** each Cycle commits
+**Then** Consistency Lag is recorded for every committed reply and shown to the Operator per lane
+
+### AC-17 (US-08): error
+**Given** requests are pending or a Cycle is open, and the worker has committed nothing for longer than the stall threshold in §6
+**When** the Operator looks at the monitoring view
+**Then** a stall indicator is raised, so missing lag data is not mistaken for a healthy worker; an idle worker with nothing pending raises no stall, and a pause (AC-09, AC-18) is shown as its own state and suppresses the stall indicator
+
+### AC-18 (US-09): cross-context
+**Given** the shared store behind the Rate Budget becomes unavailable
+**When** a worker needs allowance to accept requests
+**Then** it stops accepting new requests, stays a member of its group, shows a paused state to the Operator, and resumes automatically when the store returns without exceeding the Rate Budget
+
+### AC-19 (US-05): cross-context
+**Given** a downstream service is degraded and its calls are slow or failing
+**When** Handlers hit their per-request timeout
+**Then** the Requesters receive Error Replies and the accepted rate stays within the Rate Budget, so the degraded service is not hit harder by a retry storm from the worker
+
+## 6. Non-functional requirements
+
+Provisional numbers are marked and confirmed or deferred in §8.
+
+| Aspect | Target | Measurement |
+|---|---|---|
+| Aggregate throughput | ≥ 2,000 requests/s per worker group (provisional, "thousands" per interview) | load test in the performance environment |
+| Rate Budget accuracy | accepted rate ≤ Rate Budget × 1.05 in any sliding 1 s window (provisional) | worker "accepted per second" metric vs configured budget |
+| Priority Weight accuracy | each lane within ±10 percentage points of its effective share (weights normalised, minimum share 5%) when all lanes are busy (provisional) | per-lane accepted-rate metric |
+| Per-request Handler timeout | default 30 s from dispatch, configurable (provisional); implies a commit window above 37.5 s | startup validation + timeout counter |
+| Cycle deadline | ≤ 80% of the commit window, checked at startup (provisional) | startup validation + cycle-duration metric |
+| Priority Weight validity | every lane has a weight above 0; startup refuses a weight of 0 | startup validation |
+| Commit window | 60 s (provisional) | startup validation |
+| Identity window for a returning worker | 45 s (provisional) | rollout test |
+| Lost or duplicated committed replies | 0 | failure-scenario test suite |
+| Lane reassignment during rolling restart | 0 for workers that return within the identity window | rollout test + group membership change counter |
+| Pause on limiter outage | new requests stop within 5 s of the store becoming unreachable; resume within 30 s of its return (provisional) | failure-scenario test |
+| Stall detection | stall indicator when work is pending and 60 s pass without a commit (provisional) | stall-indicator metric |
+| Consistency Lag p95 | TBD, see §8 | Consistency Lag metric per lane |
+
+## 6.1 Security / privacy
+
+- **Data classification:** internal. Request and reply payloads belong to the owning teams and may carry confidential data; the starter does not inspect them.
+- **Personal data touched:** none added by the starter. Payloads may contain personal data; the starter must not copy payload content into logs, metrics or Error Replies.
+- **AuthZ/AuthN impact:** the worker identity needs permission to read its request lanes and write the reply destination and the commit records; a missing permission is a stop-and-alert condition (AC-09). No new end-user permission checks.
+- **Abuse cases:**
+  - Flooding by one Requester: the Rate Budget and Priority Weights bound the effect on downstream services and other lanes.
+  - Oversized or malformed requests: handled per request as an Error Reply, never as a reason to stop the worker (AC-08).
+  - Business retry after a Requester timeout: the Idempotency Key identifies the attempt, not the business operation, so Handler Owners must deduplicate with their own business identifier; documented in the starter guide.
+  - Forged or skewed request timestamps: Consistency Lag may go negative or inflate; the metric flags and excludes implausible samples.
+  - Information leak through Error Replies: replies carry a failure category and correlation only, no internal details.
+- **Security review:** Required (shared infrastructure that carries every adopting team's payloads).
+
+## 7. Metrics / KPIs
+
+- **Adoption:** baseline: 0 services; target: 1 service in production, then a second team live by writing only a Handler (timeframe TBD, see §8).
+- **Downstream overload incidents attributable to workers using the starter:** baseline: TBD (count from the incident log of the pilot service before adoption); target: 0 in the first 90 days of production use.
+- **Lost or duplicated committed replies:** baseline: 0 (new); target: 0 in production, verified by reconciliation of requests against replies.
+- **Lane reassignments during a rolling deployment:** baseline: TBD (measure on the pilot service's current worker); target: 0.
+- **Consistency Lag p95 per lane:** baseline: TBD (measure the current worker); target: TBD (see §8).
+
+## 8. Open questions
+
+- [ ] What is the trigger and deadline for this work (incident, contract, planned service)? Default now: none stated, treated as a platform investment. owner: Product Owner, due: before `sdd:design`
+- [ ] Are the provisional NFR numbers right (2,000 requests/s, 5% budget tolerance, 30 s Handler timeout, 80% Cycle deadline, 60 s commit window, 45 s identity window, 60 s stall threshold)? Note: with 30 s Handler timeout, one slow request can hold a whole Cycle, high-weight lanes included, for up to the Cycle deadline, and the fixed 60 s stall threshold gives false stalls if the commit window is 75 s or more. Default now: as listed in §6. owner: Tech Lead, due: before `sdd:design`
+- [ ] Do idle lanes hand their share to busy lanes, and what is the minimum share that prevents starvation? Default now: idle shares are redistributed, minimum share 5%. owner: Product Owner, due: before `sdd:design`
+- [ ] Which already-operated shared store hosts the Rate Budget? Default now: the in-memory store XME already runs, first adapter; others pluggable. owner: Tech Lead, due: before `sdd:design`
+- [ ] What are the correlation identifier name, the echo rules and the Error Reply format (category list)? Default now: correlation echoed unchanged, categories: failure, timeout, undeliverable. owner: Tech Lead, due: before `sdd:api`
+- [ ] Requesters must read only committed replies, otherwise they may see replies from abandoned commits; and a stuck commit delays replies for everyone. Is this an acceptable documented requirement, and is the provisional 60 s commit window right? Default now: documented requirement, 60 s window (§6). owner: Tech Lead, due: before `sdd:design`
+- [ ] Per-Request-Key ordering (AC-07c) may cut parallelism when many requests share a key, against the 2,000 requests/s target. Default now: ordering kept per key, target measured with the pilot service's real key distribution. owner: Tech Lead, due: before `sdd:design`
+- [ ] Stable-identity workers that are lost or scaled down hold their lanes until the Identity window ends. Is a runbook plus a stranded-lane alert enough? Default now: yes. owner: Operator lead, due: before `sdd:tasks`
+- [ ] Target and baseline for Consistency Lag p95 and the adoption timeframe? Default now: measure the pilot service first. owner: Product Owner, due: before the first production release
