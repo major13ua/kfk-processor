@@ -40,6 +40,11 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
     private final KafkaConsumer<byte[], byte[]> consumer;
     private final Map<String, String> laneBySource = new LinkedHashMap<>();
     private final Map<String, String> sourceByLane = new HashMap<>();
+    /**
+     * Polled but not yet returned (over a lane's quota). Kept here instead of seeking back, so a small grant
+     * (burst-capped rate budget) does not cost a re-fetch per round. Dropped for revoked partitions.
+     */
+    private final List<IncomingRequest> buffered = new ArrayList<>();
     private boolean paused;
 
     public KafkaRequestLanes(
@@ -62,6 +67,8 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         consumer.subscribe(new ArrayList<>(laneBySource.keySet()), new ConsumerRebalanceListener() {
             @Override
             public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+                Set<TopicPartition> gone = new HashSet<>(partitions);
+                buffered.removeIf(r -> gone.contains(new TopicPartition(sourceByLane.get(r.lane()), r.partition())));
                 if (!partitions.isEmpty()) {
                     metrics.groupMembershipChange();
                 }
@@ -115,13 +122,26 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
     @Override
     public List<IncomingRequest> fetch(Map<String, Integer> quotaByLane) {
         applyPauses(quotaByLane);
-        List<IncomingRequest> polled = new ArrayList<>();
-        for (ConsumerRecord<byte[], byte[]> record : consumer.poll(POLL_TIMEOUT)) {
-            polled.add(toIncoming(laneBySource.get(record.topic()), record));
+        if (!covers(quotaByLane)) {
+            for (ConsumerRecord<byte[], byte[]> record : consumer.poll(POLL_TIMEOUT)) {
+                buffered.add(toIncoming(laneBySource.get(record.topic()), record));
+            }
         }
-        List<IncomingRequest> kept = limitByQuota(polled, quotaByLane);
-        rewindUnreturned(polled, kept);
+        List<IncomingRequest> kept = limitByQuota(buffered, quotaByLane);
+        Set<IncomingRequest> returned = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        returned.addAll(kept);
+        buffered.removeIf(returned::contains);
         return kept;
+    }
+
+    /** True when the polled-but-not-returned requests already fill every lane's quota (no poll needed). */
+    private boolean covers(Map<String, Integer> quotaByLane) {
+        Map<String, Integer> have = new HashMap<>();
+        for (IncomingRequest r : buffered) {
+            have.merge(r.lane(), 1, Integer::sum);
+        }
+        return !quotaByLane.isEmpty()
+                && quotaByLane.entrySet().stream().allMatch(e -> have.getOrDefault(e.getKey(), 0) >= e.getValue());
     }
 
     /** Pauses partitions of lanes without quota (and all of them while paused) so nothing is fetched and lost. */
@@ -135,19 +155,6 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         }
         consumer.pause(pause);
         consumer.resume(resume);
-    }
-
-    /** Seeks each partition back to its first polled-but-not-returned record: never advance past what is returned. */
-    private void rewindUnreturned(List<IncomingRequest> polled, List<IncomingRequest> kept) {
-        Set<IncomingRequest> returned = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-        returned.addAll(kept);
-        Map<TopicPartition, Long> firstDropped = new HashMap<>();
-        for (IncomingRequest r : polled) {
-            if (!returned.contains(r)) {
-                firstDropped.merge(new TopicPartition(sourceByLane.get(r.lane()), r.partition()), r.position(), Math::min);
-            }
-        }
-        firstDropped.forEach(consumer::seek);
     }
 
     @Override

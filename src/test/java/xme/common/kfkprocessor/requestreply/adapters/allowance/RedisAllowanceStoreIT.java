@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.testcontainers.containers.GenericContainer;
@@ -38,6 +41,37 @@ class RedisAllowanceStoreIT {
             assertTrue(total <= BUDGET * 1.05, "granted " + total);
             assertEquals(0, sb.reserve(10));
         }
+    }
+
+    // AC-18, QG-1
+    @Test
+    void twoClientsStayWithinBudgetInAnySlidingSecond() throws InterruptedException {
+        long budget = 100;
+        List<long[]> grants = new ArrayList<>(); // {timeMillis, units}
+        try (var a = Bucket4jBudgetCounters.connect(uri(), "it-sliding", budget);
+                var b = Bucket4jBudgetCounters.connect(uri(), "it-sliding", budget)) {
+            var stores = List.of(new RedisAllowanceStore(a.counter()), new RedisAllowanceStore(b.counter()));
+            long end = System.nanoTime() + Duration.ofSeconds(4).toNanos();
+            int i = 0;
+            while (System.nanoTime() < end) {
+                long got = stores.get(i++ % 2).reserve(budget);
+                if (got > 0) {
+                    grants.add(new long[] {System.nanoTime() / 1_000_000, got});
+                }
+                Thread.sleep(2);
+            }
+        }
+        long max = 0;
+        for (int lo = 0; lo < grants.size(); lo++) {
+            long sum = 0;
+            for (int hi = lo; hi < grants.size() && grants.get(hi)[0] - grants.get(lo)[0] < 1000; hi++) {
+                sum += grants.get(hi)[1];
+            }
+            max = Math.max(max, sum);
+        }
+        long total = grants.stream().mapToLong(g -> g[1]).sum();
+        assertTrue(max <= BUDGET * 1.05, "max in a sliding second " + max);
+        assertTrue(total >= budget * 3, "throughput too low: " + total + " in 4 s");
     }
 
     // AC-10
