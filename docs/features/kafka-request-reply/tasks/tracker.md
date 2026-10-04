@@ -1,0 +1,27 @@
+# Tracker: kafka-request-reply
+
+> Status of every task in the epic. `implement` updates `done` as it commits each task.
+> States: `todo` · `in_progress` · `blocked` · `review` · `done`.
+
+| # | Task | Layer | Owner | Estimate | Blocked by | Status |
+|---|---|---|---|---|---|---|
+| T1 | Define public API types, ports and Idempotency Key | domain | <TBD lead> | M | none | todo |
+| T2 | Implement lane share calculator (weights, 5% minimum, idle redistribution) | domain | <TBD lead> | M | none | todo |
+| T3 | Add configuration properties and startup validation | app | <TBD lead> | M | T1, T2 | todo |
+| T4 | Implement the Redis-compatible AllowanceStore adapter | infra | <TBD lead> | L | T1 | todo |
+| T5 | Implement the Kafka RequestLanes adapter with stable worker identity | infra | <TBD lead> | L | T1 | todo |
+| T6 | Implement the transactional Kafka ReplySink | infra | <TBD lead> | M | T1 | todo |
+| T7 | Implement worker pause and stall state machine | app | <TBD lead> | S | T1 | todo |
+| T8 | Implement intake: reserve allowance, weighted fetch, return unused, fail closed | app | <TBD lead> | L | T1, T2, T7 | todo |
+| T9 | Implement Handler execution: virtual threads, timeout, cancellation, Error Replies | app | <TBD lead> | L | T1 | todo |
+| T10 | Add per-Request-Key ordering inside a lane | app | <TBD lead> | S | T9 | todo |
+| T11 | Assemble the Cycle commit and turn undeliverable replies into Error Replies | app | <TBD lead> | M | T1 | todo |
+| T12 | Add commit retry, destination pause and resume | app | <TBD lead> | M | T7, T11 | todo |
+| T13 | Implement the Cycle loop that ties intake, execution and commit together | app | <TBD lead> | M | T7, T8, T10, T12 | todo |
+| T14 | Implement the Micrometer WorkerMetrics adapter | infra | <TBD lead> | M | T1, T7 | todo |
+| T15 | Wire the Spring Boot auto-configuration and startup permission check | wiring | <TBD lead> | M | T3, T4, T5, T6, T13, T14 | todo |
+| T16 | Add the failure-scenario test suite | tests | <TBD lead> | L | T15 | todo |
+| T17 | Add rollout, weight-accuracy and throughput tests | tests | <TBD lead> | L | T15 | todo |
+| T18 | Write the starter guide and operator runbook | docs | <TBD lead> | M | T15 | todo |
+
+**Total:** 18 tasks, ~14.5 person-days (S=0.5, M=0.75, L=1 day; L means the full day, anything bigger was split).

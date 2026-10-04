@@ -1,0 +1,327 @@
+{
+  "slug": "kafka-request-reply",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Define public API types, ports and Idempotency Key",
+      "layer": "domain",
+      "deps": [],
+      "acs": [
+        "AC-03",
+        "AC-04"
+      ],
+      "dod": "Unit tests prove the Idempotency Key is identical across re-executions and replies carry correlation id and Request Key unchanged.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/api/",
+        "src/main/java/xme/common/kfkprocessor/requestreply/ports/"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/api-types-and-ports.md"
+    },
+    {
+      "id": "T2",
+      "title": "Implement lane share calculator (weights, 5% minimum, idle redistribution)",
+      "layer": "domain",
+      "deps": [],
+      "acs": [
+        "AC-11",
+        "AC-12"
+      ],
+      "dod": "Unit tests show lane shares follow weights, no busy lane drops below 5%, and idle shares are redistributed.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/LaneShares.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/lane-share-calculator.md"
+    },
+    {
+      "id": "T3",
+      "title": "Add configuration properties and startup validation",
+      "layer": "app",
+      "deps": [
+        "T1",
+        "T2"
+      ],
+      "acs": [
+        "AC-02",
+        "AC-15"
+      ],
+      "dod": "A misconfigured worker (conflicting timings, weight ≤ 0, no Handler, no identity) refuses to start with a message naming the conflict.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/api/RequestReplyProperties.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/autoconfig/StartupValidator.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/config-and-startup-validation.md"
+    },
+    {
+      "id": "T4",
+      "title": "Implement the Redis-compatible AllowanceStore adapter",
+      "layer": "infra",
+      "deps": [
+        "T1"
+      ],
+      "acs": [
+        "AC-10",
+        "AC-18"
+      ],
+      "dod": "Two clients on one Redis-compatible store never take more than the Rate Budget (× 1.05) in a sliding second, and an unreachable store raises the fail-closed exception.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/allowance/",
+        "build.gradle"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/allowance-store-adapter.md"
+    },
+    {
+      "id": "T5",
+      "title": "Implement the Kafka RequestLanes adapter with stable worker identity",
+      "layer": "infra",
+      "deps": [
+        "T1"
+      ],
+      "acs": [
+        "AC-14"
+      ],
+      "dod": "A worker restarted with the same identity within 45 s regains its lanes and the other worker is never reassigned.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaRequestLanes.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/kafka-request-lanes-adapter.md"
+    },
+    {
+      "id": "T6",
+      "title": "Implement the transactional Kafka ReplySink",
+      "layer": "infra",
+      "deps": [
+        "T1"
+      ],
+      "acs": [
+        "AC-05"
+      ],
+      "dod": "Replies and request positions commit atomically; a re-run Cycle never yields a second committed reply to a committed-only reader.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaReplySink.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/kafka-transactional-reply-sink.md"
+    },
+    {
+      "id": "T7",
+      "title": "Implement worker pause and stall state machine",
+      "layer": "app",
+      "deps": [
+        "T1"
+      ],
+      "acs": [
+        "AC-17"
+      ],
+      "dod": "With a fake clock, a worker with pending work and no commit for 60 s reports stalled, an idle or paused worker never does.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/WorkerState.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/pause-and-stall-state.md"
+    },
+    {
+      "id": "T8",
+      "title": "Implement intake: reserve allowance, weighted fetch, return unused, fail closed",
+      "layer": "app",
+      "deps": [
+        "T1",
+        "T2",
+        "T7"
+      ],
+      "acs": [
+        "AC-10",
+        "AC-10b",
+        "AC-18"
+      ],
+      "dod": "Intake never fetches more than the reserved allowance, returns unused units, spends none on malformed input and fails closed when the store is unreachable.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/Intake.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/intake-with-allowance.md"
+    },
+    {
+      "id": "T9",
+      "title": "Implement Handler execution: virtual threads, timeout, cancellation, Error Replies",
+      "layer": "app",
+      "deps": [
+        "T1"
+      ],
+      "acs": [
+        "AC-06",
+        "AC-07",
+        "AC-07b",
+        "AC-13",
+        "AC-19"
+      ],
+      "dod": "A failing or slow Handler yields exactly one Error Reply (failure or timeout), is never re-run, and no request outlives the Cycle deadline.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/HandlerExecutor.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/handler-executor.md"
+    },
+    {
+      "id": "T10",
+      "title": "Add per-Request-Key ordering inside a lane",
+      "layer": "app",
+      "deps": [
+        "T9"
+      ],
+      "acs": [
+        "AC-07c"
+      ],
+      "dod": "Requests with the same Request Key in a lane run in arrival order while other keys run in parallel.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/HandlerExecutor.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/KeyedDispatcher.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/per-key-ordering.md"
+    },
+    {
+      "id": "T11",
+      "title": "Assemble the Cycle commit and turn undeliverable replies into Error Replies",
+      "layer": "app",
+      "deps": [
+        "T1"
+      ],
+      "acs": [
+        "AC-08"
+      ],
+      "dod": "A reply that cannot be delivered is replaced by an Error Reply in the same commit, other requests are unaffected and no Handler re-runs.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CycleCommitter.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/cycle-commit-and-undeliverable.md"
+    },
+    {
+      "id": "T12",
+      "title": "Add commit retry, destination pause and resume",
+      "layer": "app",
+      "deps": [
+        "T7",
+        "T11"
+      ],
+      "acs": [
+        "AC-08b",
+        "AC-09"
+      ],
+      "dod": "Failed commits retry with the same results, an unavailable or forbidden destination pauses the worker in its group, and recovery re-commits without re-running Handlers.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CycleCommitter.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CommitRetry.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/commit-retry-and-destination-pause.md"
+    },
+    {
+      "id": "T13",
+      "title": "Implement the Cycle loop that ties intake, execution and commit together",
+      "layer": "app",
+      "deps": [
+        "T7",
+        "T8",
+        "T10",
+        "T12"
+      ],
+      "acs": [
+        "AC-01"
+      ],
+      "dod": "With fake ports a request travels through intake, Handler and commit and the reply carries the request correlation id.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CycleLoop.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/cycle-loop.md"
+    },
+    {
+      "id": "T14",
+      "title": "Implement the Micrometer WorkerMetrics adapter",
+      "layer": "infra",
+      "deps": [
+        "T1",
+        "T7"
+      ],
+      "acs": [
+        "AC-16"
+      ],
+      "dod": "Consistency Lag is recorded per lane for every committed reply, implausible samples are flagged and excluded.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/metrics/MicrometerWorkerMetrics.java"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/micrometer-metrics-adapter.md"
+    },
+    {
+      "id": "T15",
+      "title": "Wire the Spring Boot auto-configuration and startup permission check",
+      "layer": "wiring",
+      "deps": [
+        "T3",
+        "T4",
+        "T5",
+        "T6",
+        "T13",
+        "T14"
+      ],
+      "acs": [
+        "AC-01",
+        "AC-09"
+      ],
+      "dod": "A Handler bean plus configuration produces a running worker, and a missing destination permission pauses it instead of crashing it.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/autoconfig/RequestReplyAutoConfiguration.java",
+        "src/main/resources/META-INF/spring/"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/autoconfiguration-and-permission-check.md"
+    },
+    {
+      "id": "T16",
+      "title": "Add the failure-scenario test suite",
+      "layer": "tests",
+      "deps": [
+        "T15"
+      ],
+      "acs": [
+        "AC-03",
+        "AC-05",
+        "AC-08b",
+        "AC-18",
+        "AC-19"
+      ],
+      "dod": "Failure scenarios (kill, failed commit, destination down, store down, degraded downstream) all end with 0 lost and 0 duplicated committed replies.",
+      "files_hint": [
+        "src/test/java/xme/common/kfkprocessor/requestreply/failure/"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/failure-scenario-test-suite.md"
+    },
+    {
+      "id": "T17",
+      "title": "Add rollout, weight-accuracy and throughput tests",
+      "layer": "tests",
+      "deps": [
+        "T15"
+      ],
+      "acs": [
+        "AC-10",
+        "AC-11",
+        "AC-12",
+        "AC-14"
+      ],
+      "dod": "Rolling restart shows 0 reassignments, accepted rate stays within budget × 1.05, lanes stay within ±10 points, throughput is measured against 2,000 requests/s.",
+      "files_hint": [
+        "src/test/java/xme/common/kfkprocessor/requestreply/performance/"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/rollout-and-load-tests.md"
+    },
+    {
+      "id": "T18",
+      "title": "Write the starter guide and operator runbook",
+      "layer": "docs",
+      "deps": [
+        "T15"
+      ],
+      "acs": [
+        "AC-07"
+      ],
+      "dod": "The guide states committed-reads-only, same-key-one-lane, cooperative cancellation next to the Idempotency Key note, and the stranded-lane runbook.",
+      "files_hint": [
+        "docs/kafka-request-reply-starter-guide.md"
+      ],
+      "file": "docs/features/kafka-request-reply/tasks/starter-guide-and-runbook.md"
+    }
+  ]
+}
