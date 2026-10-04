@@ -11,7 +11,7 @@
 | T4 | Implement the Redis-compatible AllowanceStore adapter | infra | <TBD lead> | L | T1 | done |
 | T5 | Implement the Kafka RequestLanes adapter with stable worker identity | infra | <TBD lead> | L | T1 | done |
 | T6 | Implement the transactional Kafka ReplySink | infra | <TBD lead> | M | T1 | done |
-| T7 | Implement worker pause and stall state machine | app | <TBD lead> | S | T1 | todo |
+| T7 | Implement worker pause and stall state machine | app | <TBD lead> | S | T1 | done |
 | T8 | Implement intake: reserve allowance, weighted fetch, return unused, fail closed | app | <TBD lead> | L | T1, T2, T7 | todo |
 | T9 | Implement Handler execution: virtual threads, timeout, cancellation, Error Replies | app | <TBD lead> | L | T1 | todo |
 | T10 | Add per-Request-Key ordering inside a lane | app | <TBD lead> | S | T9 | todo |
