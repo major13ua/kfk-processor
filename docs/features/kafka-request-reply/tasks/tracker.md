@@ -5,7 +5,7 @@
 
 | # | Task | Layer | Owner | Estimate | Blocked by | Status |
 |---|---|---|---|---|---|---|
-| T1 | Define public API types, ports and Idempotency Key | domain | <TBD lead> | M | none | todo |
+| T1 | Define public API types, ports and Idempotency Key | domain | <TBD lead> | M | none | done |
 | T2 | Implement lane share calculator (weights, 5% minimum, idle redistribution) | domain | <TBD lead> | M | none | todo |
 | T3 | Add configuration properties and startup validation | app | <TBD lead> | M | T1, T2 | todo |
 | T4 | Implement the Redis-compatible AllowanceStore adapter | infra | <TBD lead> | L | T1 | todo |
