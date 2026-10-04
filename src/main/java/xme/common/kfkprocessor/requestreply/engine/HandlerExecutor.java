@@ -2,6 +2,7 @@ package xme.common.kfkprocessor.requestreply.engine;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
@@ -21,6 +22,8 @@ import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
 /** Runs Handler calls on virtual threads under a per-request timeout and the Cycle deadline. */
 public final class HandlerExecutor<K, REQ, RES> {
 
+    private static final long POLL_NANOS = TimeUnit.MILLISECONDS.toNanos(5);
+
     private final RequestReplyHandler<K, REQ, RES> handler;
     private final Function<IncomingRequest, REQ> decoder;
     private final Duration requestTimeout;
@@ -34,34 +37,51 @@ public final class HandlerExecutor<K, REQ, RES> {
         this.requestTimeout = requestTimeout;
     }
 
-    /** Dispatches all requests in parallel; returns one result per request, in input order, within cycleDeadline. */
+    /**
+     * Dispatches requests per Request Key (parallel across keys, FIFO within a key); returns one result per
+     * request, in input order, within cycleDeadline.
+     */
     public List<HandlerResult<K, RES>> executeCycle(List<IncomingRequest> requests, Duration cycleDeadline) {
-        long budgetNanos = Math.min(requestTimeout.toNanos(), cycleDeadline.toNanos());
-        long dispatchedAt = System.nanoTime();
+        long cycleEnd = System.nanoTime() + cycleDeadline.toNanos();
         var slots = new ArrayList<Slot>(requests.size());
-        var done = new CountDownLatch(requests.size());
+        var bySlot = new IdentityHashMap<IncomingRequest, Slot>();
+        var decided = new CountDownLatch(requests.size());
         for (IncomingRequest request : requests) {
-            var slot = new Slot(request);
+            var slot = new Slot(request, decided);
             slots.add(slot);
-            Thread.ofVirtual().start(() -> run(slot, done));
+            bySlot.put(request, slot);
         }
-        long remaining = budgetNanos - (System.nanoTime() - dispatchedAt);
+        new KeyedDispatcher().dispatch(requests, r -> run(bySlot.get(r), cycleEnd));
         try {
-            done.await(Math.max(remaining, 0), TimeUnit.NANOSECONDS);
+            while (decided.getCount() > 0) {
+                long now = System.nanoTime();
+                long untilCycleEnd = cycleEnd - now;
+                if (untilCycleEnd <= 0) {
+                    break;
+                }
+                for (Slot slot : slots) {
+                    if (now - slot.deadline >= 0) {
+                        slot.decide(errorResult(slot.request, ErrorCategory.TIMEOUT), true);
+                    }
+                }
+                decided.await(Math.min(untilCycleEnd, POLL_NANOS), TimeUnit.NANOSECONDS);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
         var results = new ArrayList<HandlerResult<K, RES>>(slots.size());
         for (Slot slot : slots) {
-            if (slot.outcome.compareAndSet(null, errorResult(slot.request, ErrorCategory.TIMEOUT))) {
-                slot.cancelled.set(true);
-            }
+            slot.decide(errorResult(slot.request, ErrorCategory.TIMEOUT), true);
             results.add(slot.outcome.get());
         }
         return results;
     }
 
-    private void run(Slot slot, CountDownLatch done) {
+    private void run(Slot slot, long cycleEnd) {
+        if (slot.outcome.get() != null) {
+            return; // already decided (cycle deadline): never dispatch
+        }
+        slot.deadline = Math.min(System.nanoTime() + requestTimeout.toNanos(), cycleEnd);
         try {
             IncomingRequest r = slot.request;
             @SuppressWarnings("unchecked")
@@ -87,12 +107,9 @@ public final class HandlerExecutor<K, REQ, RES> {
                     r.headers(),
                     signal);
             RES data = handler.handle(ctx, decoder.apply(r));
-            slot.outcome.compareAndSet(
-                    null, new HandlerResult<>(r, new Reply<>(r.correlationId(), key, data), null));
+            slot.decide(new HandlerResult<>(r, new Reply<>(r.correlationId(), key, data), null), false);
         } catch (Throwable t) {
-            slot.outcome.compareAndSet(null, errorResult(slot.request, ErrorCategory.FAILURE));
-        } finally {
-            done.countDown();
+            slot.decide(errorResult(slot.request, ErrorCategory.FAILURE), false);
         }
     }
 
@@ -103,11 +120,24 @@ public final class HandlerExecutor<K, REQ, RES> {
 
     private final class Slot {
         final IncomingRequest request;
+        final CountDownLatch decided;
         final AtomicReference<HandlerResult<K, RES>> outcome = new AtomicReference<>();
         final AtomicBoolean cancelled = new AtomicBoolean();
+        /** Absolute nanoTime deadline; unset (never expires) until the request is dispatched. */
+        volatile long deadline = System.nanoTime() + Long.MAX_VALUE / 2;
 
-        Slot(IncomingRequest request) {
+        Slot(IncomingRequest request, CountDownLatch decided) {
             this.request = request;
+            this.decided = decided;
+        }
+
+        void decide(HandlerResult<K, RES> result, boolean cancel) {
+            if (outcome.compareAndSet(null, result)) {
+                if (cancel) {
+                    cancelled.set(true);
+                }
+                decided.countDown();
+            }
         }
     }
 }
