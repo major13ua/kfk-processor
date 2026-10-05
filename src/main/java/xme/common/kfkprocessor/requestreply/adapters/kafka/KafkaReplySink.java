@@ -250,8 +250,10 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
 
     /**
      * Writes the Cycle in as many transactions as it takes: a reply that fails for a per-reply reason moves to its
-     * fallback, then is dropped, and the transaction is aborted and written again. Every round demotes at least one
-     * reply, so it ends. Destination faults are thrown.
+     * fallback, then is dropped, and the transaction is aborted and written again. A rejected send poisons the
+     * transaction, so the sends after it fail with the same exception: only the first failing reply of a round is
+     * demoted, the others are sent again unchanged. Every round demotes one reply by one stage, so there are at most
+     * {@code 2n + 1} rounds. Destination faults are thrown.
      */
     private CommitResult transact(Producer<byte[], byte[]> p, List<ReplyRecord> replies) {
         int n = replies.size();
@@ -264,12 +266,11 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
             boolean restart = sendRound(p, replies, stage, first, async);
             if (!restart) {
                 p.flush();
-                for (int i = 0; i < n; i++) {
-                    Exception e = async.get(i);
-                    if (e != null) {
-                        demote(i, e, stage, first, replies);
-                        restart = true;
-                    }
+                int rejected = firstFailed(async);
+                if (rejected >= 0) {
+                    // the sends after it fail with the same exception as collateral: only the first is demoted
+                    demote(rejected, async.get(rejected), stage, first, replies);
+                    restart = true;
                 }
             }
             if (restart) {
@@ -340,12 +341,17 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         } catch (RuntimeException ignored) {
             return false;
         }
+        return firstFailed(async) >= 0;
+    }
+
+    /** Index of the lowest reply whose send failed in the round, or -1. */
+    private static int firstFailed(AtomicReferenceArray<Exception> async) {
         for (int i = 0; i < async.length(); i++) {
             if (async.get(i) != null) {
-                return true;
+                return i;
             }
         }
-        return false;
+        return -1;
     }
 
     /** Moves reply {@code i} to its next stage; a destination fault is thrown instead. */

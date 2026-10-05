@@ -274,4 +274,33 @@ class KafkaReplySinkIT {
         assertEquals(List.of("ok-1=a"), committedRepliesWithValues(env, Duration.ofSeconds(5)));
         assertEquals(2L, groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset());
     }
+
+    private static final String PAD = "x".repeat(3000);
+
+    // AC-08 (review A4: undrained sends fail with the oversized reply's exception; only that reply is demoted)
+    @Test
+    void oneBrokerRejectedReplyAmongManyDemotesOnlyThatReply() throws Exception {
+        var env = Env.create(8000); // followers of 3 KB: many batches, more than max.in.flight, so some are still undrained when the first is rejected
+        var replies = new ArrayList<ReplyRecord>();
+        replies.add(new ReplyRecord("high", 0, 0, "big", "key-big", new byte[9000], false, b("undeliverable")));
+        for (int i = 1; i <= 50; i++) {
+            replies.add(new ReplyRecord("high", 0, i, "ok-" + i, "key-ok-" + i, b("v" + i + PAD), false,
+                    b("undeliverable-ok-" + i)));
+        }
+        CommitResult r;
+        try (var sink = env.sink()) {
+            r = sink.commit(replies);
+        }
+        assertEquals(List.of("big"), r.failures().stream().map(CommitResult.ReplyFailure::correlationId).toList(),
+                "only the rejected reply is a failure");
+        var expected = new ArrayList<String>();
+        expected.add("big=undeliverable");
+        for (int i = 1; i <= 50; i++) {
+            expected.add("ok-" + i + "=v" + i + PAD);
+        }
+        var committed = committedRepliesWithValues(env, Duration.ofSeconds(8));
+        assertEquals(51, committed.size(), "one committed reply per request");
+        assertEquals(expected.stream().sorted().toList(), committed.stream().sorted().toList());
+        assertEquals(51L, groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset());
+    }
 }

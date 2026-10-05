@@ -62,7 +62,7 @@ class KafkaReplySinkTest {
         }
     }
 
-    private static KafkaReplySink sink(Producer p) {
+    private static KafkaReplySink sink(MockProducer<byte[], byte[]> p) {
         return new KafkaReplySink(p, REPLIES, SOURCES, new ConsumerGroupMetadata("grp", -1, "", java.util.Optional.empty()));
     }
 
@@ -246,6 +246,61 @@ class KafkaReplySinkTest {
         assertFalse(p.transactionAborted());
         assertEquals(1, p.consumerGroupOffsetsHistory().size());
         assertEquals(4L, p.consumerGroupOffsetsHistory().get(0).get("grp").get(new TopicPartition("src-high", 0)).offset());
+    }
+
+    /**
+     * Models the real client: once a record of the transaction is rejected, the records sent after it in the same
+     * transaction fail with the same exception (batch-mates, undrained batches); beginTransaction resets that.
+     */
+    private static final class CollateralProducer extends MockProducer<byte[], byte[]> {
+        private RuntimeException poison;
+
+        CollateralProducer() {
+            super(true, null, new ByteArraySerializer(), new ByteArraySerializer());
+        }
+
+        @Override
+        public synchronized void beginTransaction() {
+            poison = null;
+            super.beginTransaction();
+        }
+
+        @Override
+        public synchronized Future<RecordMetadata> send(ProducerRecord<byte[], byte[]> record, Callback callback) {
+            if (poison == null && new String(record.value(), StandardCharsets.UTF_8).equals("huge")) {
+                poison = new RecordTooLargeException("too large");
+            }
+            if (poison == null) {
+                return super.send(record, callback);
+            }
+            if (callback != null) {
+                callback.onCompletion(null, poison);
+            }
+            return CompletableFuture.failedFuture(poison);
+        }
+    }
+
+    // AC-08 (review A4: one rejected reply must not demote the replies that failed only as collateral)
+    @Test
+    void onlyTheRejectedReplyBecomesAnErrorReplyWhenLaterSendsFailWithTheSameException() {
+        var p = new CollateralProducer();
+        var replies = new java.util.ArrayList<ReplyRecord>();
+        replies.add(withFallback("high", 0, 0, "big", b("huge"), b("undeliverable-big")));
+        for (int i = 1; i <= 50; i++) {
+            replies.add(withFallback("high", 0, i, "ok-" + i, b("v" + i), b("undeliverable-ok-" + i)));
+        }
+        CommitResult result = sink(p).commit(replies);
+
+        assertEquals(List.of("big"), result.failures().stream().map(CommitResult.ReplyFailure::correlationId).toList(),
+                "only the rejected reply is a failure, the collateral ones are re-sent unchanged");
+        assertEquals(51, p.history().size(), "exactly one record per request");
+        for (var r : p.history()) {
+            String c = corr(r);
+            String expected = c.equals("big") ? "undeliverable-big" : "v" + c.substring(3);
+            assertEquals(expected, new String(r.value(), StandardCharsets.UTF_8), "value of " + c);
+        }
+        assertTrue(p.transactionCommitted());
+        assertEquals(51L, p.consumerGroupOffsetsHistory().get(0).get("grp").get(new TopicPartition("src-high", 0)).offset());
     }
 
     // AC-08 (client-side limit, nothing sent for the primary)
