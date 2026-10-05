@@ -19,7 +19,11 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.kafka.autoconfigure.KafkaConnectionDetails;
 import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
+import org.springframework.boot.kafka.autoconfigure.SslBundleSslEngineFactory;
+import org.springframework.boot.ssl.SslBundle;
+import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.core.ResolvableType;
@@ -92,18 +96,20 @@ public class RequestReplyAutoConfiguration {
     @Bean
     @DependsOn(CHECK)
     @ConditionalOnMissingBean
-    RequestLanes requestReplyLanes(RequestReplyProperties props, Environment env, WorkerMetrics metrics) {
-        return new KafkaRequestLanes(props, clientProperties(env), props.getGroupId(), metrics);
+    RequestLanes requestReplyLanes(RequestReplyProperties props, Environment env, WorkerMetrics metrics,
+            ObjectProvider<KafkaConnectionDetails> details, ObjectProvider<SslBundles> sslBundles) {
+        return new KafkaRequestLanes(props, clientProperties(env, details, sslBundles), props.getGroupId(), metrics);
     }
 
     @Bean
     @DependsOn(CHECK)
     @ConditionalOnMissingBean
-    ReplySink requestReplySink(RequestReplyProperties props, Environment env, RequestLanes lanes) {
+    ReplySink requestReplySink(RequestReplyProperties props, Environment env, RequestLanes lanes,
+            ObjectProvider<KafkaConnectionDetails> details, ObjectProvider<SslBundles> sslBundles) {
         // offsets travel with the lanes consumer's live group metadata, so the group fences a stale worker
         java.util.function.Supplier<org.apache.kafka.clients.consumer.ConsumerGroupMetadata> metadata =
                 lanes instanceof KafkaRequestLanes kafkaLanes ? kafkaLanes::groupMetadata : null;
-        return new KafkaReplySink(props, clientProperties(env), props.getGroupId(), metadata);
+        return new KafkaReplySink(props, clientProperties(env, details, sslBundles), props.getGroupId(), metadata);
     }
 
     @Bean
@@ -124,8 +130,9 @@ public class RequestReplyAutoConfiguration {
     @Bean
     @DependsOn(CHECK)
     @ConditionalOnMissingBean
-    DestinationProbe requestReplyDestinationProbe(RequestReplyProperties props, Environment env) {
-        return new DefaultKafkaDestinationProbe(clientProperties(env), props.getReplyDestination(),
+    DestinationProbe requestReplyDestinationProbe(RequestReplyProperties props, Environment env,
+            ObjectProvider<KafkaConnectionDetails> details, ObjectProvider<SslBundles> sslBundles) {
+        return new DefaultKafkaDestinationProbe(clientProperties(env, details, sslBundles), props.getReplyDestination(),
                 props.getLanes().stream().map(RequestReplyProperties.Lane::getSource).toList(),
                 KafkaReplySink.transactionalId(props.getGroupId(), props.getWorkerIdentity()));
     }
@@ -237,10 +244,47 @@ public class RequestReplyAutoConfiguration {
      * client of the worker, so a secured cluster works for all three. {@code client.id} is left to each client.
      */
     static Map<String, Object> clientProperties(Environment env) {
+        return clientProperties(env, null, null);
+    }
+
+    /**
+     * As {@link #clientProperties(Environment)}, plus what Spring Boot's KafkaAutoConfiguration applies: the bootstrap
+     * servers, security protocol and SSL bundle of a {@link KafkaConnectionDetails} bean win over
+     * {@code spring.kafka.*}, and {@code spring.kafka.ssl.bundle} is resolved through {@link SslBundles}.
+     */
+    static Map<String, Object> clientProperties(Environment env, ObjectProvider<KafkaConnectionDetails> details,
+            ObjectProvider<SslBundles> sslBundles) {
         KafkaProperties kafka = Binder.get(env).bind("spring.kafka", KafkaProperties.class)
                 .orElseGet(KafkaProperties::new);
         Map<String, Object> out = new LinkedHashMap<>(kafka.buildAdminProperties());
         out.remove("client.id");
+        SslBundle bundle = null;
+        String bundleName = kafka.getSsl().getBundle();
+        if (bundleName != null && !bundleName.isBlank()) {
+            SslBundles bundles = sslBundles == null ? null : sslBundles.getIfAvailable();
+            if (bundles == null) {
+                throw new ConfigurationRefusedException("request_reply.config.ssl_bundles_missing",
+                        "spring.kafka.ssl.bundle is set but no SslBundles bean exists."
+                                + " [request_reply.config.ssl_bundles_missing]");
+            }
+            bundle = bundles.getBundle(bundleName);
+        }
+        KafkaConnectionDetails d = details == null ? null : details.getIfAvailable();
+        if (d != null) {
+            KafkaConnectionDetails.Configuration admin = d.getAdmin();
+            out.put("bootstrap.servers", admin.getBootstrapServers());
+            if (admin.getSecurityProtocol() != null && !admin.getSecurityProtocol().isBlank()) {
+                out.put("security.protocol", admin.getSecurityProtocol());
+            }
+            if (admin.getSslBundle() != null) {
+                bundle = admin.getSslBundle();
+            }
+        }
+        if (bundle != null) {
+            out.put("ssl.engine.factory.class", SslBundleSslEngineFactory.class);
+            out.put(SslBundle.class.getName(), bundle);
+            out.putIfAbsent("security.protocol", "SSL");
+        }
         out.values().removeIf(java.util.Objects::isNull);
         return out;
     }

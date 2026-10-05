@@ -21,6 +21,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.errors.AuthorizationException;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
@@ -171,7 +172,7 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
     private ConsumerRecords<byte[], byte[]> poll(Duration timeout) {
         try {
             return consumer.poll(timeout);
-        } catch (AuthorizationException e) {
+        } catch (AuthorizationException | AuthenticationException e) {
             throw new LaneAccessDeniedException("request lanes denied: " + e.getClass().getSimpleName(), e);
         }
     }

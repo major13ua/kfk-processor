@@ -15,6 +15,7 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.errors.AuthorizationException;
 import org.apache.kafka.common.errors.InvalidProducerEpochException;
 import org.apache.kafka.common.errors.ProducerFencedException;
@@ -438,7 +439,7 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
     }
 
     private static ReplyDestinationFault destinationFault(Throwable e) {
-        if (e instanceof AuthorizationException) {
+        if (e instanceof AuthorizationException || e instanceof AuthenticationException) {
             return new ReplyDestinationFault.PermissionDenied("reply destination denies access", e);
         }
         return new ReplyDestinationFault.Unavailable("reply destination unavailable", e);
@@ -449,7 +450,7 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         if (isFenced(e)) {
             return new ReplyDestinationFault.Fenced("fenced by a newer instance with the same transactional id", e);
         }
-        if (e instanceof AuthorizationException || outcomeUnknown(e)) {
+        if (e instanceof AuthorizationException || e instanceof AuthenticationException || outcomeUnknown(e)) {
             return destinationFault(e);
         }
         return e;
