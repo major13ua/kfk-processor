@@ -75,3 +75,12 @@
 | F28 | Sink: wrapped CommitFailed, mid-batch reject IT rework, Alert.reason null note (T5, S5) | done |
 | F29 | Test hardening (stage-2 test items) | done |
 | F30 | Docs: fenced wording, runbook, test-plan, section 8 deferral (S4) | done |
+
+## Review follow-ups round 5 (from `_review/review-2026-10-05-r5.md`)
+
+| # | Task | Status |
+|---|---|---|
+| F31 | Sink: collateral sibling failures, all-rejected InvalidRecord is a destination fault, mid-batch IT restored (R2, R4) | todo |
+| F32 | Engine: alert streak only reset on COMMITTED, Error on commit path, missing engine tests (R3, R4) | todo |
+| F33 | Startup: refuse compacted reply topic, non-vacuous lifecycle test (R4, R5) | todo |
+| F34 | Docs: rerun exception, ADR-0007, SAD, fenced wording, dashes, section 8 (R1, R5) | todo |

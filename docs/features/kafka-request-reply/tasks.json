@@ -882,6 +882,81 @@
         "docs/kafka-request-reply-starter-guide.md"
       ],
       "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r4.md"
+    },
+    {
+      "id": "F31",
+      "title": "Sink: skip collateral batch-sibling failures when picking the reply to demote; all-rejected InvalidRecordException round is a destination fault; siblings-aware fake; restore mid-batch MESSAGE_TOO_LARGE IT; strengthen INVALID_RECORD asserts (R2, R4)",
+      "layer": "adapters",
+      "deps": [
+        "F30"
+      ],
+      "acs": [
+        "AC-08",
+        "AC-08b"
+      ],
+      "dod": "RED first: fake producer fails siblings like Sender.failBatch; partial reject demotes only the rejected reply; all-rejected pauses with nothing dropped; IT asserts REJECTED/committed siblings/!substituted.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka",
+        "src/test/java/xme/common/kfkprocessor/requestreply/adapters/kafka"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r5.md"
+    },
+    {
+      "id": "F32",
+      "title": "Engine: cycle.failed streak resets only on COMMITTED; commit-path catch handles Error; tests for holding guard, Error keep-alive, IDLE between failures, stale lastCommitted (R3, R4)",
+      "layer": "engine",
+      "deps": [
+        "F31"
+      ],
+      "acs": [
+        "AC-09",
+        "AC-05",
+        "AC-08b",
+        "AC-16"
+      ],
+      "dod": "RED first for each listed case; gate green.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine",
+        "src/test/java/xme/common/kfkprocessor/requestreply/engine"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r5.md"
+    },
+    {
+      "id": "F33",
+      "title": "Startup: probe refuses compacted reply topic with request_reply.config.* code; lifecycle loop-never-started test made non-vacuous (R4, R5)",
+      "layer": "autoconfig",
+      "deps": [
+        "F32"
+      ],
+      "acs": [
+        "AC-08",
+        "AC-09"
+      ],
+      "dod": "RED first: probe/startup refuses cleanup.policy compact on the reply destination; lifecycle test asserts loop not started without sleep. Code listed in public-api.md and guide.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/autoconfig",
+        "src/test/java/xme/common/kfkprocessor/requestreply/autoconfig"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r5.md"
+    },
+    {
+      "id": "F34",
+      "title": "Docs: rerun-after-dispatch exception (AC-07b/AC-08), ADR-0007, SAD flow 2, test-plan, section 8; fenced wording; remove long dashes in task files; section 8 R2 wording (R1, R5)",
+      "layer": "docs",
+      "deps": [
+        "F33"
+      ],
+      "acs": [
+        "AC-07b",
+        "AC-08",
+        "AC-08b"
+      ],
+      "dod": "Docs consistent with code after F31-F33; exception flagged for Tech Lead sign-off.",
+      "files_hint": [
+        "docs/features/kafka-request-reply",
+        "docs/kafka-request-reply-starter-guide.md"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r5.md"
     }
   ]
 }
