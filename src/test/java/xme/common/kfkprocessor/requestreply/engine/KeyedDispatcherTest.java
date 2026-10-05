@@ -126,4 +126,27 @@ class KeyedDispatcherTest {
 
         assertEquals(4, count.get());
     }
+
+    // AC-07c / AC-13 (review B11): order is per key within a lane; the same key in two lanes is two chains
+    @Test
+    void sameKeyInTwoLanesRunsInParallel() throws Exception {
+        var bothStarted = new CountDownLatch(2);
+        var parallel = new AtomicInteger();
+        var high = new IncomingRequest("high", 0, 1, "k", "c-1", Map.of(), new byte[0]);
+        var low = new IncomingRequest("low", 0, 1, "k", "c-2", Map.of(), new byte[0]);
+
+        var done = new KeyedDispatcher().dispatch(List.of(high, low), r -> {
+            bothStarted.countDown();
+            try {
+                if (bothStarted.await(2, TimeUnit.SECONDS)) {
+                    parallel.incrementAndGet();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        done.get(10, TimeUnit.SECONDS);
+
+        assertEquals(2, parallel.get(), "a slow request in one lane must not hold the same key in another lane");
+    }
 }

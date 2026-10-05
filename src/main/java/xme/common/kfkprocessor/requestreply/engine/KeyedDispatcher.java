@@ -6,20 +6,24 @@ import java.util.function.Consumer;
 import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
 
 /**
- * Per-Request-Key FIFO inside a lane: requests sharing a key run one after another in list (arrival)
+ * Per-Request-Key FIFO inside a lane: requests sharing a lane and a key run one after another in list (arrival)
  * order, distinct keys run in parallel on virtual threads.
  */
 public final class KeyedDispatcher {
 
+    /** A chain is one Request Key in one lane: the same key in another lane is independent. */
+    private record Chain(String lane, Object requestKey) {
+    }
+
     /**
-     * Starts one virtual-thread chain per distinct request key and returns immediately. Within a chain
+     * Starts one virtual-thread chain per distinct (lane, request key) and returns immediately. Within a chain
      * {@code runner} is invoked sequentially in input order; a runner that throws does not stop its chain.
      * The returned future completes when every request has been passed to the runner and the runner returned.
      */
     public CompletableFuture<Void> dispatch(List<IncomingRequest> requests, Consumer<IncomingRequest> runner) {
-        var chains = new java.util.LinkedHashMap<Object, List<IncomingRequest>>();
+        var chains = new java.util.LinkedHashMap<Chain, List<IncomingRequest>>();
         for (IncomingRequest request : requests) {
-            chains.computeIfAbsent(request.requestKey(), k -> new java.util.ArrayList<>()).add(request);
+            chains.computeIfAbsent(new Chain(request.lane(), request.requestKey()), k -> new java.util.ArrayList<>()).add(request);
         }
         var futures = new java.util.ArrayList<CompletableFuture<Void>>(chains.size());
         for (List<IncomingRequest> chain : chains.values()) {
