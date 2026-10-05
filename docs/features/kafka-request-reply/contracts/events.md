@@ -2,7 +2,7 @@
 status: Draft
 owner: "Ievgen Chupryna"
 reviewers: ["Tech Lead"]
-updated_at: "2026-10-04"
+updated_at: "2026-10-05"
 feature_size: M
 ---
 
@@ -76,7 +76,7 @@ Origin: flow 1 and flow 5 "committed reply with same correlation and Request Key
 
 - **Idempotency key:** `lane:partition:position` of the request, handed to the Handler, never put on the reply. Same on every re-execution (AC-03, flow 5).
 - **Duplicate prevention:** the reply and request position commit in one transaction; a repeated Cycle after failure cannot add a second committed reply (AC-05).
-- **Retry:** a failed commit retries the same results, up to 3 attempts, Handlers not re-run (flow 2, ADR-0007). A commit that times out has an unknown outcome: the sink resolves it by committing again on the same transaction and never re-sends the replies. After that the worker pauses, probes the destination and re-commits in a new transaction.
+- **Retry:** a failed commit retries the same results, up to 3 attempts, Handlers not re-run (flow 2, ADR-0007). A commit that times out has an unknown outcome: the sink resolves it by committing again on the same transaction and never re-sends the replies. After that the worker pauses, probes the destination and re-commits in a new transaction. If the commit stays outstanding past the commit window the broker aborts it and the producer is fenced: the worker pauses with alert `request_reply.reply_destination.fenced`, nothing is re-sent, and a manual restart is needed; the Cycle's Handlers then re-run (spec AC-08b exception). A commit rejected by a group rebalance is not a destination fault: results of revoked partitions are dropped and the rest retried.
 - **Dead-letter:** none, by design. Requesters get an Error Reply instead of silence; the Requester decides about retry (spec §1). The async template's DLQ rule does not apply.
 
 ## Schema registry

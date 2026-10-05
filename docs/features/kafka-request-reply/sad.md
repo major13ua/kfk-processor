@@ -213,6 +213,10 @@ sequenceDiagram
         end
         Engine->>Platform: re-commits the held results in a new transaction, Handlers not re-run
     end
+    alt commit outstanding past the commit window (producer fenced)
+        Engine->>Operator: pauses, alerts fenced, does not resume by itself
+        Operator->>Engine: restarts the worker, requests are fetched again, Handlers re-run
+    end
 ```
 
 **Critical flow 3: limiter outage and recovery**

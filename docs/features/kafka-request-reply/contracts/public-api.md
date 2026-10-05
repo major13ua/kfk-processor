@@ -2,7 +2,7 @@
 status: Draft
 owner: "Ievgen Chupryna"
 reviewers: ["Tech Lead"]
-updated_at: "2026-10-04"
+updated_at: "2026-10-05"
 feature_size: M
 interface_kind: library-sdk
 ---
@@ -81,7 +81,7 @@ An Error Reply carries category, correlation id and Request Key only. No excepti
 | `draw-per-round` | int | 100 | allowance units drawn per intake round | ADR-0003 |
 | `probe-interval` | duration | 5s | interval of reply-destination and allowance-store probes while paused | AC-08b, AC-09, AC-18 |
 
-Kafka brokers and security settings (`spring.kafka.bootstrap-servers`, `spring.kafka.security.*`, `spring.kafka.ssl.*`, `spring.kafka.properties.*`) are applied to the consumer, producer and probe client alike. Beans `RequestLanes`, `ReplySink`, `AllowanceStore` and `DestinationProbe` replace the defaults; a `Consumer<CommitRetry.Alert>` bean named `requestReplyAlertListener` replaces the default error log of configuration faults.
+Kafka brokers and security settings (`spring.kafka.bootstrap-servers`, `spring.kafka.security.*`, `spring.kafka.ssl.*`, `spring.kafka.properties.*`) are applied to the consumer, producer and probe client alike. A `KafkaConnectionDetails` bean overrides `spring.kafka.bootstrap-servers`. Beans `RequestLanes`, `ReplySink`, `AllowanceStore` and `DestinationProbe` replace the defaults; a `Consumer<CommitRetry.Alert>` bean named `requestReplyAlertListener` replaces the default error log of configuration faults.
 
 Startup validation (flow 4) fails with a plain-language message naming the conflicting values. Error codes, neutral `module.error_name`:
 
@@ -104,7 +104,7 @@ Startup validation (flow 4) fails with a plain-language message naming the confl
 | `request_reply.config.ssl_bundles_missing` | an SSL bundle named by the Kafka connection details is not defined |
 | `request_reply.config.allowance_store_missing` | no `allowance-store.redis-uri` and no `AllowanceStore` bean |
 
-Runtime faults (no exception to the Handler; state and metrics instead): `request_reply.reply_destination.permission_denied` (AC-09: no WRITE on the reply destination, no READ on a lane at the start probe, or no permission on the transactional id), `request_reply.request_lane.permission_denied` (AC-09: a later poll is denied READ on a lane or the group; the worker pauses, alerts once and retries every `probe-interval`), `request_reply.reply_destination.unavailable` (AC-08b), `request_reply.reply.undeliverable` (AC-08: a reply had no deliverable fallback and was dropped, the position commits; alert raised once per commit, no pause, no payload in the log), `request_reply.reply_destination.fenced` (AC-05: the producer is fenced, by a newer instance with the transactional id or by the broker aborting a commit held past the commit window; the producer is never re-created, nothing is re-sent, the worker stays paused (destination) until restarted), `request_reply.rate_budget_store.unavailable` (AC-18). Metric `errorReply(UNDELIVERABLE)` counts every reply replaced by its undeliverable Error Reply and every dropped reply; the consistency-lag sample is skipped only for dropped ones.
+Runtime faults (no exception to the Handler; state and metrics instead): `request_reply.reply_destination.permission_denied` (AC-09: no WRITE on the reply destination, no READ on a lane at the start probe, no permission on the transactional id, or TLS/SASL authentication failed: check certificates and credentials), `request_reply.request_lane.permission_denied` (AC-09: a later poll is denied READ on a lane or the group; the worker pauses, alerts once and retries every `probe-interval`; also raised when TLS/SASL authentication failed: check certificates and credentials), `request_reply.reply_destination.unavailable` (AC-08b; also an invalid reply topic name at runtime, a destination fault; a commit rejected by a group rebalance is not this fault: keep-alive, revoked results dropped, no destination alert), `request_reply.cycle.failed` (AC-09: an unexpected error between intake and commit; the accepted requests are handed back, alert once, no pause), `request_reply.reply.undeliverable` (AC-08: a reply had no deliverable fallback and was dropped, the position commits; alert raised once per commit, no pause, no payload in the log; a fault with no pause reason, not a pause), `request_reply.reply_destination.fenced` (AC-05: the producer is fenced, by a newer instance with the transactional id or by the broker aborting a commit held past the commit window; the producer is never re-created, nothing is re-sent, the worker stays paused (destination) until restarted), `request_reply.rate_budget_store.unavailable` (AC-18). Metric `errorReply(UNDELIVERABLE)` counts every reply replaced by its undeliverable Error Reply and every dropped reply; the consistency-lag sample is skipped only for dropped ones.
 
 ## 4. Extension ports (SPI, pluggable adapters)
 
