@@ -44,7 +44,7 @@
         "AC-02",
         "AC-15"
       ],
-      "dod": "A misconfigured worker (conflicting timings, weight ≤ 0, no Handler, no identity) refuses to start with a message naming the conflict.",
+      "dod": "A misconfigured worker (conflicting timings, weight \u2264 0, no Handler, no identity) refuses to start with a message naming the conflict.",
       "files_hint": [
         "src/main/java/xme/common/kfkprocessor/requestreply/api/RequestReplyProperties.java",
         "src/main/java/xme/common/kfkprocessor/requestreply/autoconfig/StartupValidator.java"
@@ -62,7 +62,7 @@
         "AC-10",
         "AC-18"
       ],
-      "dod": "Two clients on one Redis-compatible store never take more than the Rate Budget (× 1.10) in a sliding second, and an unreachable store raises the fail-closed exception.",
+      "dod": "Two clients on one Redis-compatible store never take more than the Rate Budget (\u00d7 1.10) in a sliding second, and an unreachable store raises the fail-closed exception.",
       "files_hint": [
         "src/main/java/xme/common/kfkprocessor/requestreply/adapters/allowance/",
         "build.gradle"
@@ -301,7 +301,7 @@
         "AC-12",
         "AC-14"
       ],
-      "dod": "Rolling restart shows 0 reassignments, accepted rate stays within budget × 1.10, lanes stay within ±10 points, throughput is measured against 2,000 requests/s.",
+      "dod": "Rolling restart shows 0 reassignments, accepted rate stays within budget \u00d7 1.10, lanes stay within \u00b110 points, throughput is measured against 2,000 requests/s.",
       "files_hint": [
         "src/test/java/xme/common/kfkprocessor/requestreply/performance/"
       ],
@@ -322,6 +322,200 @@
         "docs/kafka-request-reply-starter-guide.md"
       ],
       "file": "docs/features/kafka-request-reply/tasks/starter-guide-and-runbook.md"
+    },
+    {
+      "id": "F1",
+      "title": "Investigate the 2 failing ITs (RateBudgetAccuracyIT:107, WeightAccuracyIT:52); fix defect or over-tight test, make WeightAccuracyIT assert +-10pp",
+      "layer": "engine",
+      "deps": [
+        "T18"
+      ],
+      "acs": [
+        "AC-10",
+        "AC-11"
+      ],
+      "dod": "Both ITs pass deterministically; WeightAccuracyIT asserts what its name claims.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/",
+        "src/test/"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05.md"
+    },
+    {
+      "id": "F2",
+      "title": "KafkaReplySink: rejected reply (A1), unknown commit outcome + fencing + txn id (A2), Error Reply wire format and raw-byte keys (B8)",
+      "layer": "infra",
+      "deps": [
+        "F1"
+      ],
+      "acs": [
+        "AC-01",
+        "AC-04",
+        "AC-05",
+        "AC-06",
+        "AC-08"
+      ],
+      "dod": "Reproducing RED tests for A1/A2/B8 turn green; Error Reply distinguishable on wire; no duplicate committed replies after commit timeout.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaReplySink.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CommitRetry.java",
+        "docs/features/kafka-request-reply/contracts/"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05.md"
+    },
+    {
+      "id": "F3",
+      "title": "Keep polling while paused/held (A3), no loss on intake sub-round failure (A4), bound surplus buffer (A7)",
+      "layer": "engine",
+      "deps": [
+        "F2"
+      ],
+      "acs": [
+        "AC-05",
+        "AC-08b",
+        "AC-09",
+        "AC-10b",
+        "AC-14",
+        "AC-18"
+      ],
+      "dod": "Paused worker keeps group membership past max.poll.interval; no fetched request dropped; buffer bounded.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CycleLoop.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/Intake.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaRequestLanes.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05.md"
+    },
+    {
+      "id": "F4",
+      "title": "Stall gauge accuracy (A5) and record lag/handlerTimeout/commitAttempt metrics (B12)",
+      "layer": "engine",
+      "deps": [
+        "F3"
+      ],
+      "acs": [
+        "AC-07",
+        "AC-16",
+        "AC-17"
+      ],
+      "dod": "Gauge reflects stalled/blocked worker without state change; metrics emitted.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/WorkerState.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CycleLoop.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/HandlerExecutor.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CommitRetry.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05.md"
+    },
+    {
+      "id": "F5",
+      "title": "Graceful stop does not turn undecided slots into TIMEOUT replies or false destination alert (A6)",
+      "layer": "engine",
+      "deps": [
+        "F4"
+      ],
+      "acs": [
+        "AC-07",
+        "AC-14"
+      ],
+      "dod": "Graceful stop leaves undecided requests uncommitted for redelivery.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/HandlerExecutor.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CommitRetry.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CycleLoop.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05.md"
+    },
+    {
+      "id": "F6",
+      "title": "Complete startup validation (B9), handler type guard (B14), document key=request_key (B13)",
+      "layer": "app",
+      "deps": [
+        "F5"
+      ],
+      "acs": [
+        "AC-01",
+        "AC-02",
+        "AC-07c"
+      ],
+      "dod": "Each missing rule has a failing-then-passing test; docs updated.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/autoconfig/StartupValidator.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/autoconfig/RequestReplyAutoConfiguration.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05.md"
+    },
+    {
+      "id": "F7",
+      "title": "Permission probe: lane READ + transactional id, security props, exception mapping (B10)",
+      "layer": "infra",
+      "deps": [
+        "F6"
+      ],
+      "acs": [
+        "AC-09"
+      ],
+      "dod": "Probe covers lane read and txn id ACL; denial is reported not looped silently.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/autoconfig/DefaultKafkaDestinationProbe.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaReplySink.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05.md"
+    },
+    {
+      "id": "F8",
+      "title": "Per-lane Request Key chains (B11)",
+      "layer": "app",
+      "deps": [
+        "F7"
+      ],
+      "acs": [
+        "AC-07c",
+        "AC-13"
+      ],
+      "dod": "Same key in two lanes does not serialize across lanes.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/KeyedDispatcher.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05.md"
+    },
+    {
+      "id": "F9",
+      "title": "Test gaps: smoke test revert, CI fails without Docker, missing AC tests, throughput assertion, budgets>=20 (Group D, C test part)",
+      "layer": "tests",
+      "deps": [
+        "F8"
+      ],
+      "acs": [
+        "AC-06",
+        "AC-07",
+        "AC-08",
+        "AC-09",
+        "AC-10",
+        "AC-13",
+        "AC-17"
+      ],
+      "dod": "Gaps from review Group D closed.",
+      "files_hint": [
+        "src/test/"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05.md"
+    },
+    {
+      "id": "F10",
+      "title": "Spec drift: record x1.10 decision, align spec \u00a78 / test-plan / guide (Group C) and cheap stage-2 items",
+      "layer": "docs",
+      "deps": [
+        "F9"
+      ],
+      "acs": [
+        "AC-10"
+      ],
+      "dod": "Docs consistent; requires Tech Lead confirmation.",
+      "files_hint": [
+        "docs/features/kafka-request-reply/"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05.md"
     }
   ]
 }

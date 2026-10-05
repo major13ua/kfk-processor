@@ -120,10 +120,24 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
     }
 
     @Override
+    public boolean awaitAvailable() {
+        if (paused) {
+            return false;
+        }
+        if (buffered.isEmpty()) {
+            consumer.resume(consumer.assignment());
+            for (ConsumerRecord<byte[], byte[]> record : consumer.poll(POLL_TIMEOUT)) {
+                buffered.add(toIncoming(laneBySource.get(record.topic()), record));
+            }
+        }
+        return !buffered.isEmpty();
+    }
+
+    @Override
     public List<IncomingRequest> fetch(Map<String, Integer> quotaByLane) {
         applyPauses(quotaByLane);
         if (!covers(quotaByLane)) {
-            for (ConsumerRecord<byte[], byte[]> record : consumer.poll(POLL_TIMEOUT)) {
+            for (ConsumerRecord<byte[], byte[]> record : consumer.poll(Duration.ZERO)) {
                 buffered.add(toIncoming(laneBySource.get(record.topic()), record));
             }
         }

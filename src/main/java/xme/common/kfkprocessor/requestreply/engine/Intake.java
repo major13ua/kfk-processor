@@ -61,6 +61,9 @@ public final class Intake {
             return paused();
         }
         lastAttempt = now;
+        // wait for data before taking allowance: a unit held through a blocking poll would be handed to a
+        // Handler late and make the accepted rate in a sliding second exceed the Rate Budget (AC-10)
+        boolean available = paused || lanes.awaitAvailable();
         long granted;
         try {
             granted = store.reserve(drawPerRound);
@@ -78,6 +81,11 @@ public final class Intake {
             lanes.resume();
         }
         if (granted <= 0) {
+            return new IntakeResult(List.of(), List.of(), false);
+        }
+        if (!available) {
+            // the store was probed (fail-closed detection) but there is nothing to accept: return the units
+            store.giveBack(granted);
             return new IntakeResult(List.of(), List.of(), false);
         }
         List<IncomingRequest> accepted = new ArrayList<>();

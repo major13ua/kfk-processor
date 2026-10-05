@@ -12,6 +12,15 @@ public interface RequestLanes {
      */
     List<IncomingRequest> fetch(Map<String, Integer> quotaByLane);
 
+    /**
+     * Waits briefly (without holding any allowance) until requests are available for {@link #fetch}, so the
+     * Rate Budget unit is taken close to the hand-off to a Handler (AC-10). Returns false when nothing arrived.
+     * Default: assume available.
+     */
+    default boolean awaitAvailable() {
+        return true;
+    }
+
     /** Stops fetching while staying in the group (pause by limiter or reply destination). */
     void pause();
 

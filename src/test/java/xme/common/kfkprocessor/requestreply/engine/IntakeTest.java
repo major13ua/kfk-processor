@@ -85,6 +85,11 @@ class IntakeTest {
             return out;
         }
 
+        @Override public boolean awaitAvailable() {
+            calls.add("await");
+            return waiting.values().stream().anyMatch(w -> !w.isEmpty());
+        }
+
         @Override public void pause() { pauses++; }
         @Override public void resume() { resumes++; }
     }
@@ -133,8 +138,25 @@ class IntakeTest {
         backlog("low", 20);
         intake.intake();
         assertEquals((long) DRAW, store.requested.get(0));
-        assertEquals("reserve", store.calls.get(0));
+        assertEquals("reserve", store.calls.stream().filter(c -> !c.equals("await")).findFirst().orElseThrow());
         assertTrue(store.calls.indexOf("fetch") > store.calls.indexOf("reserve"));
+    }
+
+    // AC-10: wait for data before taking allowance, so no unit is held through a blocking wait
+    @Test
+    void awaitsDataBeforeReserving() {
+        backlog("high", 20);
+        intake.intake();
+        assertTrue(store.calls.indexOf("await") < store.calls.indexOf("reserve"));
+    }
+
+    // AC-10 / AC-18: nothing waiting: store still probed, units returned at once, nothing fetched
+    @Test
+    void nothingWaitingProbesStoreReturnsUnitsAndDoesNotFetch() {
+        IntakeResult r = intake.intake();
+        assertTrue(r.accepted().isEmpty());
+        assertTrue(lanes.fetches.isEmpty());
+        assertEquals(DRAW, store.returned);
     }
 
     // AC-10: split by lane share, fetched never above granted

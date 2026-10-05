@@ -25,3 +25,18 @@
 | T18 | Write the starter guide and operator runbook | docs | <TBD lead> | M | T15 | done |
 
 **Total:** 18 tasks, ~14.5 person-days (S=0.5, M=0.75, L=1 day; L means the full day, anything bigger was split).
+
+## Review follow-ups (from `_review/review-2026-10-05.md`)
+
+| # | Task | Status |
+|---|---|---|
+| F1 | Failing ITs AC-10 / AC-11 | done |
+| F2 | KafkaReplySink A1, A2, B8 | todo |
+| F3 | Poll while paused, intake loss, buffer bound (A3, A4, A7) | todo |
+| F4 | Stall gauge + metrics (A5, B12) | todo |
+| F5 | Graceful stop (A6) | todo |
+| F6 | Startup validation, handler types, docs (B9, B14, B13) | todo |
+| F7 | Probe (B10) | todo |
+| F8 | Per-lane key chains (B11) | todo |
+| F9 | Test gaps (Group D) | todo |
+| F10 | Spec drift + stage-2 docs (Group C) | todo |
