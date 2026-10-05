@@ -58,6 +58,17 @@ class KafkaReplySinkIT {
             return env;
         }
 
+        /** A compacted reply topic: the broker rejects a record without a key (INVALID_RECORD). */
+        static Env createCompacted() throws Exception {
+            String id = UUID.randomUUID().toString().substring(0, 8);
+            var env = new Env("grp-" + id, "worker-" + id, "req-" + id, "rep-" + id);
+            try (Admin admin = Admin.create(Map.<String, Object>of("bootstrap.servers", kafka.getBootstrapServers()))) {
+                admin.createTopics(List.of(new NewTopic(env.requests, 2, (short) 1),
+                        new NewTopic(env.replies, 1, (short) 1).configs(Map.of("cleanup.policy", "compact")))).all().get();
+            }
+            return env;
+        }
+
         KafkaReplySink sink() {
             var p = new RequestReplyProperties();
             p.setWorkerIdentity(identity);
@@ -304,42 +315,27 @@ class KafkaReplySinkIT {
         assertEquals(51L, groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset());
     }
 
-    private static final int AHEAD = 40;
-
-    // AC-08, review r3 Group C: the rejected reply sits mid-batch, not at index 0. Spec section 8 (F14 residual)
-    // allows good replies ahead of it to be answered with an undeliverable Error Reply; on this broker the producer
-    // splits the rejected batch and resends, so they are delivered. Either way the invariants below hold: one
-    // committed reply per request, every reported failure matches what the Requester sees, positions committed.
+    // AC-08, review r4 S5: a per-record broker validation failure (INVALID_RECORD: the reply topic is compacted and
+    // the sink's reply records carry no key, so the broker rejects each record, primary and fallback alike) is a
+    // per-reply failure, never a destination fault: the Cycle commits, every reply is reported as failed, the
+    // positions are committed. (MESSAGE_TOO_LARGE cannot pin a mid-batch reject: the producer splits and resends.)
     @Test
-    void midBatchBrokerRejectedReplyKeepsOneCommittedReplyPerRequestAndReportsExactlyTheSubstitutedOnes() throws Exception {
-        var env = Env.create(8000);
+    void recordValidationRejectedRepliesAreReportedPerReplyAndTheCycleStillCommits() throws Exception {
+        var env = Env.createCompacted();
         var replies = new ArrayList<ReplyRecord>();
-        for (int i = 0; i < AHEAD; i++) {
-            replies.add(new ReplyRecord("high", 0, i, "ok-" + i, "key-ok-" + i, b("v" + i + PAD), false,
-                    b("undeliverable-ok-" + i)));
-        }
-        replies.add(new ReplyRecord("high", 0, AHEAD, "big", "key-big", new byte[9000], false, b("undeliverable-big")));
-        for (int i = AHEAD + 1; i < AHEAD + 11; i++) {
-            replies.add(new ReplyRecord("high", 0, i, "ok-" + i, "key-ok-" + i, b("v" + i + PAD), false,
-                    b("undeliverable-ok-" + i)));
+        for (int i = 0; i < 5; i++) {
+            replies.add(new ReplyRecord("high", 0, i, "r-" + i, "key-r-" + i, b("v" + i), false, b("undeliverable-" + i)));
         }
         CommitResult r;
         try (var sink = env.sink()) {
             r = sink.commit(replies);
         }
-        var failed = r.failures().stream().map(CommitResult.ReplyFailure::correlationId).toList();
-        assertTrue(failed.contains("big"), "the rejected reply is a failure: " + failed);
-        var expected = new ArrayList<String>();
-        for (ReplyRecord rep : replies) {
-            boolean substituted = failed.contains(rep.correlationId());
-            expected.add(rep.correlationId() + "=" + new String(substituted ? rep.fallback() : rep.value(),
-                    StandardCharsets.UTF_8));
-        }
-        var committed = committedRepliesWithValues(env, Duration.ofSeconds(8));
-        assertEquals(replies.size(), committed.size(), "one committed reply per request");
-        assertEquals(expected.stream().sorted().toList(), committed.stream().sorted().toList(),
-                "what the Requesters see matches the reported failures");
-        assertEquals(List.of("big"), failed, "only the rejected reply is substituted (good replies ahead of it survive)");
-        assertEquals((long) replies.size(), groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset());
+        assertEquals(List.of("r-0", "r-1", "r-2", "r-3", "r-4"),
+                r.failures().stream().map(CommitResult.ReplyFailure::correlationId).sorted().toList(),
+                "every rejected reply is a per-reply failure");
+        assertEquals(List.of(), committedRepliesWithValues(env, Duration.ofSeconds(3)),
+                "the broker accepted none of them");
+        assertEquals(5L, groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset(),
+                "the positions of the Cycle commit");
     }
 }

@@ -81,7 +81,7 @@ An Error Reply carries category, correlation id and Request Key only. No excepti
 | `draw-per-round` | int | 100 | allowance units drawn per intake round | ADR-0003 |
 | `probe-interval` | duration | 5s | interval of reply-destination and allowance-store probes while paused | AC-08b, AC-09, AC-18 |
 
-Kafka brokers and security settings (`spring.kafka.bootstrap-servers`, `spring.kafka.security.*`, `spring.kafka.ssl.*`, `spring.kafka.properties.*`) are applied to the consumer, producer and probe client alike. A `KafkaConnectionDetails` bean overrides `spring.kafka.bootstrap-servers`. Beans `RequestLanes`, `ReplySink`, `AllowanceStore` and `DestinationProbe` replace the defaults; a `Consumer<CommitRetry.Alert>` bean named `requestReplyAlertListener` replaces the default error log of configuration faults.
+Kafka brokers and security settings (`spring.kafka.bootstrap-servers`, `spring.kafka.security.*`, `spring.kafka.ssl.*`, `spring.kafka.properties.*`) are applied to the consumer, producer and probe client alike. A `KafkaConnectionDetails` bean overrides `spring.kafka.bootstrap-servers`. Beans `RequestLanes`, `ReplySink`, `AllowanceStore` and `DestinationProbe` replace the defaults; a `Consumer<CommitRetry.Alert>` bean named `requestReplyAlertListener` replaces the default error log of configuration faults. `CommitRetry.Alert.reason()` is null for alerts that are not a pause (`cycle.failed`, `reply.undeliverable`); listeners must not assume it is non-null.
 
 Startup validation (flow 4) fails with a plain-language message naming the conflicting values. Error codes, neutral `module.error_name`:
 

@@ -431,6 +431,46 @@ class KafkaReplySinkTest {
         assertMembershipChanged(new org.apache.kafka.clients.consumer.CommitFailedException(), false);
     }
 
+    // review r4 T5: kafka-clients 4.2.1 commitTransaction throws the wrapped form in an error state
+    @Test
+    void wrappedCommitFailedExceptionAtCommitIsMembershipChanged() {
+        assertMembershipChanged(new org.apache.kafka.common.KafkaException(
+                "Cannot execute transactional method because we are in an error state",
+                new org.apache.kafka.clients.consumer.CommitFailedException()), false);
+    }
+
+    @Test
+    void wrappedFencedInstanceIdAtCommitIsMembershipChanged() {
+        assertMembershipChanged(new org.apache.kafka.common.KafkaException(
+                "Cannot execute transactional method because we are in an error state",
+                new org.apache.kafka.common.errors.FencedInstanceIdException("static member fenced")), false);
+    }
+
+    @Test
+    void wrappedCommitFailedExceptionAtOffsetsIsMembershipChanged() {
+        assertMembershipChanged(new org.apache.kafka.common.KafkaException(
+                "Cannot execute transactional method because we are in an error state",
+                new org.apache.kafka.clients.consumer.CommitFailedException()), true);
+    }
+
+    // review r4 S5: a per-record broker validation failure (INVALID_RECORD) in the middle of a batch is a per-reply
+    // failure: that reply moves to its fallback, the others are delivered, nothing is thrown as a destination fault
+    @Test
+    void invalidRecordOnOneReplyMidBatchDemotesOnlyThatReply() {
+        var p = new Producer();
+        p.fault = r -> new String(r.value(), StandardCharsets.UTF_8).equals("bad")
+                ? new org.apache.kafka.common.InvalidRecordException("Compacted topic cannot accept message without key")
+                : null;
+        CommitResult r = sink(p).commit(List.of(
+                reply("high", 0, 0, "c-0", b("a")),
+                new ReplyRecord("high", 0, 1, "c-1", "key-c-1", b("bad"), false, b("undeliverable")),
+                reply("high", 0, 2, "c-2", b("c"))));
+        assertEquals(1, r.failures().size());
+        assertEquals("c-1", r.failures().get(0).correlationId());
+        assertTrue(r.failures().get(0).substituted());
+        assertTrue(p.transactionCommitted());
+    }
+
     // AC-09 (review B10): security settings reach the producer
     @Test
     void producerGetsTheSharedClientProperties() {
