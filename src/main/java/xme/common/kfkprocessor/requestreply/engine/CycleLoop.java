@@ -187,6 +187,8 @@ public final class CycleLoop<K, REQ, RES> {
             Iteration it;
             try {
                 it = runOnce();
+            } catch (CycleInterruptedException e) {
+                return; // graceful stop: the Cycle's requests stay uncommitted and are redelivered
             } catch (RuntimeException | Error e) {
                 if (!running || Thread.currentThread().isInterrupted()) {
                     return;

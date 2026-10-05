@@ -111,6 +111,7 @@ class CycleLoopTest {
         @Override public void groupMembershipChange() { }
     }
 
+    private final List<CommitRetry.Alert> alerts = new java.util.concurrent.CopyOnWriteArrayList<>();
     private FakeClock clock;
     private FakeStore store;
     private FakeLanes lanes;
@@ -137,7 +138,7 @@ class CycleLoopTest {
         CycleCommitter<String, String> committer = new CycleCommitter<>(sink,
                 r -> ("reply|" + r.correlationId() + "|" + r.data()).getBytes(StandardCharsets.UTF_8),
                 e -> ("error|" + e.category()).getBytes(StandardCharsets.UTF_8));
-        retry = new CommitRetry<>(committer, probe, state, clock, PROBE, 2, a -> { }, metrics);
+        retry = new CommitRetry<>(committer, probe, state, clock, PROBE, 2, alerts::add, metrics);
     }
 
     private CycleLoop<String, String, String> loop(Duration cycleDeadline) {
@@ -428,5 +429,28 @@ class CycleLoopTest {
         sink.failWith = new IllegalStateException("flaky");
         loop(Duration.ofSeconds(5)).runOnce();
         assertEquals(1 + 2, metrics.commitAttempts.get(), "two attempts for the failing Cycle");
+    }
+
+    // AC-07, AC-14 (A6): graceful stop leaves undecided requests uncommitted, with no Error Reply and no alert
+    @Test
+    void gracefulStopDuringAHandlerCommitsNothingAndRaisesNoAlert() throws Exception {
+        java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        handler = (ctx, req) -> {
+            entered.countDown();
+            new java.util.concurrent.CountDownLatch(1).await();
+            return "never";
+        };
+        lanes.waiting.add(reqText("high", "inflight"));
+        CycleLoop<String, String, String> loop = loop(Duration.ofSeconds(30));
+        loop.start();
+        assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+
+        loop.stop();
+
+        assertTrue(sink.commits.isEmpty(), "nothing committed: the request is redelivered");
+        assertTrue(metrics.errorReplies.isEmpty(), "no TIMEOUT Error Reply");
+        assertTrue(alerts.isEmpty());
+        assertEquals(null, state.pauseReason());
+        assertFalse(retry.holding());
     }
 }

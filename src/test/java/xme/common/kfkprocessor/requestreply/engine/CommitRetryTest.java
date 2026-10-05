@@ -3,6 +3,7 @@ package xme.common.kfkprocessor.requestreply.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Proxy;
@@ -123,6 +124,24 @@ class CommitRetryTest {
             assertEquals("c1", call.get(0).correlationId());
             assertEquals(7L, call.get(0).position());
         }
+    }
+
+    // AC-14 (A6): an interrupt during the commit (graceful stop) is not a destination fault
+    @Test
+    void interruptedCommitIsAbandonedWithoutHoldingPausingOrAlerting() {
+        sink.alwaysFail = true;
+        sink.alwaysFailWith = unavailable();
+        Thread.currentThread().interrupt();
+        try {
+            assertThrows(CycleInterruptedException.class, () -> retry.commit(cycle()));
+        } finally {
+            Thread.interrupted();
+        }
+
+        assertFalse(retry.holding());
+        assertNull(state.pauseReason());
+        assertTrue(alerts.isEmpty(), "no false destination alert");
+        assertEquals(1, sink.calls.size(), "no retry after the interrupt");
     }
 
     @Test

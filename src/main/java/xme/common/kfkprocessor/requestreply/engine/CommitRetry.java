@@ -62,9 +62,11 @@ public final class CommitRetry<K, RES> {
                 state.commitSucceeded();
                 return Optional.of(out);
             } catch (ReplyDestinationFault fault) {
+                abandonIfInterrupted(fault);
                 hold(results, fault);
                 return Optional.empty();
             } catch (RuntimeException ex) {
+                abandonIfInterrupted(ex);
                 // same results, next attempt
             }
         }
@@ -75,6 +77,13 @@ public final class CommitRetry<K, RES> {
     /** The results held awaiting the destination, or null. */
     public synchronized List<HandlerResult<K, RES>> heldResults() {
         return held;
+    }
+
+    /** An interrupt is a graceful stop, not a destination fault: leave the Cycle uncommitted, no pause, no alert. */
+    private static void abandonIfInterrupted(RuntimeException cause) {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new CycleInterruptedException(cause);
+        }
     }
 
     private void commitAttempted() {
@@ -108,8 +117,10 @@ public final class CommitRetry<K, RES> {
             heldReason = null;
             return Optional.of(out);
         } catch (ReplyDestinationFault fault) {
+            abandonIfInterrupted(fault);
             moveReason(reasonOf(fault));
         } catch (RuntimeException ex) {
+            abandonIfInterrupted(ex);
             // still failing: keep holding under the current reason
         }
         return Optional.empty();

@@ -218,4 +218,32 @@ class HandlerExecutorTest {
         assertEquals(ErrorCategory.TIMEOUT, results.get(0).errorReply().category());
         assertFalse(results.get(0).errorReply().toString().contains(SECRET));
     }
+
+    // AC-07, AC-14 (A6): an interrupt (graceful stop) abandons the Cycle; undecided slots are not turned into TIMEOUT replies
+    @Test
+    void interruptDuringTheCycleAbandonsItInsteadOfDecidingTimeouts() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        var executor = executor((ctx, in) -> {
+            entered.countDown();
+            new CountDownLatch(1).await();
+            return "never";
+        }, Duration.ofSeconds(30));
+        var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var returned = new java.util.concurrent.atomic.AtomicReference<Object>();
+        Thread worker = new Thread(() -> {
+            try {
+                returned.set(executor.executeCycle(List.of(req("a", 1, "k1", "x")), LONG_DEADLINE));
+            } catch (Throwable t) {
+                thrown.set(t);
+            }
+        });
+        worker.start();
+        assertTrue(entered.await(5, TimeUnit.SECONDS));
+
+        worker.interrupt();
+        worker.join(5_000);
+
+        assertEquals(null, returned.get(), "no results (no TIMEOUT Error Replies) for an interrupted Cycle");
+        assertTrue(thrown.get() instanceof CycleInterruptedException, "was " + thrown.get());
+    }
 }

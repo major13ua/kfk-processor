@@ -39,7 +39,8 @@ public final class HandlerExecutor<K, REQ, RES> {
 
     /**
      * Dispatches requests per Request Key (parallel across keys, FIFO within a key); returns one result per
-     * request, in input order, within cycleDeadline.
+     * request, in input order, within cycleDeadline. If the calling thread is interrupted (graceful stop) the Cycle
+     * is abandoned with {@link CycleInterruptedException}: undecided requests get no result.
      */
     public List<HandlerResult<K, RES>> executeCycle(List<IncomingRequest> requests, Duration cycleDeadline) {
         long cycleEnd = System.nanoTime() + cycleDeadline.toNanos();
@@ -68,6 +69,10 @@ public final class HandlerExecutor<K, REQ, RES> {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            for (Slot slot : slots) {
+                slot.cancelled.set(true); // stop the Handlers; the undecided requests stay uncommitted
+            }
+            throw new CycleInterruptedException(e);
         }
         var results = new ArrayList<HandlerResult<K, RES>>(slots.size());
         for (Slot slot : slots) {
