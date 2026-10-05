@@ -17,8 +17,12 @@ import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
  */
 public final class CommitRetry<K, RES> {
 
-    /** Operator alert: why the worker paused and the fault id. */
+    /** Operator alert: why the worker paused (null: a fault without pause) and the fault id. */
     public record Alert(WorkerState.PauseReason reason, String faultId) {
+        /** A fault that does not pause the worker: no pause reason. */
+        public static Alert fault(String faultId) {
+            return new Alert(null, faultId);
+        }
     }
 
     private static final String UNAVAILABLE = "request_reply.reply_destination.unavailable";

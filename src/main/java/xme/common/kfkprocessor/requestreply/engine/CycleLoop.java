@@ -27,6 +27,7 @@ public final class CycleLoop<K, REQ, RES> {
     private static final long IDLE_BACKOFF_MILLIS = 10;
     private static final String LANE_PERMISSION_DENIED = "request_reply.request_lane.permission_denied";
 
+    private static final String CYCLE_FAILED = "request_reply.cycle.failed";
     private static final String REPLY_UNDELIVERABLE = "request_reply.reply.undeliverable";
 
     private final Intake intake;
@@ -108,10 +109,44 @@ public final class CycleLoop<K, REQ, RES> {
             state.setPendingWork(false);
             return Iteration.IDLE;
         }
+        List<HandlerResult<K, RES>> results = new ArrayList<>();
         Instant start = clock.instant();
+        try {
+            runCycle(in, results);
+        } catch (CycleInterruptedException e) {
+            throw e; // graceful stop: the Cycle's requests stay uncommitted and are redelivered
+        } catch (RuntimeException | Error e) {
+            abandon(in, e);
+            throw e;
+        }
+        Optional<CommitResult> committed = retry.commit(results);
+        metrics.cycleDuration(Duration.between(start, clock.instant()));
+        if (committed.isEmpty()) {
+            return Iteration.HELD;
+        }
+        state.setPendingWork(false);
+        reportUndeliverable(committed.get());
+        recordLag(results, committed.get());
+        return Iteration.COMMITTED;
+    }
+
+    /** Before the commit takes ownership: hand the fetched requests back so they are served again, alert once. */
+    private void abandon(IntakeResult in, Throwable cause) {
+        try {
+            intake.abandon(in);
+        } catch (RuntimeException | Error e) {
+            cause.addSuppressed(e);
+        }
+        try {
+            alert.accept(CommitRetry.Alert.fault(CYCLE_FAILED));
+        } catch (RuntimeException | Error e) {
+            cause.addSuppressed(e);
+        }
+    }
+
+    private void runCycle(IntakeResult in, List<HandlerResult<K, RES>> results) {
         state.setPendingWork(true);
         state.setCycleOpen(true);
-        List<HandlerResult<K, RES>> results = new ArrayList<>();
         try {
             if (!in.accepted().isEmpty()) {
                 in.accepted().stream().map(IncomingRequest::lane).distinct().forEach(lane -> metrics.accepted(lane,
@@ -134,15 +169,6 @@ public final class CycleLoop<K, REQ, RES> {
                 }
             }
         }
-        Optional<CommitResult> committed = retry.commit(results);
-        metrics.cycleDuration(Duration.between(start, clock.instant()));
-        if (committed.isEmpty()) {
-            return Iteration.HELD;
-        }
-        state.setPendingWork(false);
-        reportUndeliverable(committed.get());
-        recordLag(results, committed.get());
-        return Iteration.COMMITTED;
     }
 
     private Iteration onLanesDenied() {

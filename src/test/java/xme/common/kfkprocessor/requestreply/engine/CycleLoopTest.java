@@ -61,7 +61,7 @@ class CycleLoopTest {
         @Override public void giveBack(long units) { }
     }
 
-    private static final class FakeLanes implements RequestLanes {
+    private static class FakeLanes implements RequestLanes {
         final List<IncomingRequest> waiting = new ArrayList<>();
         int fetches;
         int keepAlives;
@@ -70,6 +70,12 @@ class CycleLoopTest {
         final java.util.Set<IncomingRequest> revoked =
                 java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         Runnable onKeepAlive = () -> { };
+        /** Every list handed back through {@link #release}; handed-back requests are served again first. */
+        final List<List<IncomingRequest>> released = new ArrayList<>();
+        @Override public void release(List<IncomingRequest> requests) {
+            released.add(List.copyOf(requests));
+            waiting.addAll(0, requests);
+        }
         final List<List<IncomingRequest>> committedAfterHold = new ArrayList<>();
         @Override public boolean revokedSinceFetch(IncomingRequest request) { return revoked.contains(request); }
         @Override public void committedAfterHold(List<IncomingRequest> requests) {
@@ -124,7 +130,15 @@ class CycleLoopTest {
         final List<State> states = new java.util.concurrent.CopyOnWriteArrayList<>();
         final java.util.concurrent.atomic.AtomicInteger handlerTimeouts = new java.util.concurrent.atomic.AtomicInteger();
         final java.util.concurrent.atomic.AtomicInteger commitAttempts = new java.util.concurrent.atomic.AtomicInteger();
-        @Override public void accepted(String lane, long count) { accepted.merge(lane, count, Long::sum); }
+        RuntimeException failAcceptedOnce;
+        @Override public void accepted(String lane, long count) {
+            if (failAcceptedOnce != null) {
+                RuntimeException e = failAcceptedOnce;
+                failAcceptedOnce = null;
+                throw e;
+            }
+            accepted.merge(lane, count, Long::sum);
+        }
         @Override public void consistencyLag(String lane, Duration lag, boolean implausible) {
             lags.add(new Object[] {lane, lag, implausible});
         }
@@ -628,5 +642,69 @@ class CycleLoopTest {
                 "no payload in the log");
         assertEquals(1, alerts.size(), "the Operator is alerted");
         assertTrue(alerts.get(0).faultId().toLowerCase().contains("undeliverable"), alerts.get(0).faultId());
+    }
+
+    // AC-09 (review r3 B2): an unexpected RuntimeException between intake and commit must not lose the fetched
+    // requests (out of the buffer, position advanced, never answered). Chosen behavior, same as Intake's fetch
+    // failure: runOnce hands every fetched request (accepted and immediate-error ones) back through
+    // RequestLanes.release in poll order, raises an alert, and rethrows the original exception (loop() logs it).
+    @Test
+    void unexpectedFailureAfterIntakeHandsEveryFetchedRequestBackInPollOrderAlertsAndRethrows() {
+        IncomingRequest first = reqText("high", "a");
+        IncomingRequest oversized = req("high", 200);
+        IncomingRequest last = reqText("high", "b");
+        lanes.waiting.addAll(List.of(first, oversized, last));
+        IllegalStateException boom = new IllegalStateException("unexpected");
+        metrics.failAcceptedOnce = boom;
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+
+        IllegalStateException thrown = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalStateException.class, loop::runOnce);
+
+        assertEquals(boom, thrown);
+        assertEquals(List.of(List.of(first, oversized, last)), lanes.released,
+                "all fetched requests handed back once, in poll order (accepted and immediate errors merged)");
+        assertTrue(sink.commits.isEmpty(), "nothing committed for the failed Cycle");
+        assertEquals(1, alerts.size(), "the Operator is alerted: no silent loss");
+        assertEquals("request_reply.cycle.failed", alerts.get(0).faultId());
+        assertEquals(null, state.pauseReason(), "the worker keeps running: the requests are served again");
+    }
+
+    // AC-09 (review r3 B2): the handed-back requests are really served again, in order, and answered once
+    @Test
+    void requestsHandedBackAfterAnUnexpectedFailureAreAnsweredByTheNextIteration() {
+        IncomingRequest first = reqText("high", "a");
+        IncomingRequest second = reqText("high", "b");
+        lanes.waiting.addAll(List.of(first, second));
+        metrics.failAcceptedOnce = new IllegalStateException("unexpected");
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, loop::runOnce);
+
+        assertEquals(CycleLoop.Iteration.COMMITTED, loop.runOnce());
+
+        assertEquals(1, sink.commits.size());
+        assertEquals(List.of(first.correlationId(), second.correlationId()),
+                sink.commits.get(0).stream().map(ReplyRecord::correlationId).toList());
+    }
+
+    // AC-09 (review r3 B2): a failure of the hand-back itself must not mask the original cause
+    @Test
+    void failureWhileHandingBackKeepsTheOriginalExceptionAndStillAlerts() {
+        lanes.waiting.add(reqText("high", "a"));
+        IllegalStateException boom = new IllegalStateException("unexpected");
+        metrics.failAcceptedOnce = boom;
+        RuntimeException releaseFailure = new IllegalArgumentException("release failed");
+        FakeLanes failing = new FakeLanes() {
+            @Override public void release(List<IncomingRequest> requests) { throw releaseFailure; }
+        };
+        failing.waiting.addAll(lanes.waiting);
+        lanes = failing;
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+
+        RuntimeException thrown = org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, loop::runOnce);
+
+        assertEquals(boom, thrown);
+        assertTrue(java.util.Arrays.asList(thrown.getSuppressed()).contains(releaseFailure));
+        assertEquals(1, alerts.size());
     }
 }

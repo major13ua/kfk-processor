@@ -140,8 +140,9 @@ public class RequestReplyAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(name = "requestReplyAlertListener")
     Consumer<CommitRetry.Alert> requestReplyAlertListener() {
-        return a -> LOG.log(System.Logger.Level.ERROR,
-                "Request-reply worker paused (" + a.reason() + "): " + a.faultId());
+        return a -> LOG.log(System.Logger.Level.ERROR, a.reason() == null
+                ? "Request-reply fault: " + a.faultId()
+                : "Request-reply worker paused (" + a.reason() + "): " + a.faultId());
     }
 
     @Bean

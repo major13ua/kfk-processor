@@ -131,6 +131,7 @@ public final class Intake {
         // read again from the committed offset (or by the new owner), so they do not enter this Cycle
         accepted.removeIf(lanes::revokedSinceFetch);
         errors.removeIf(e -> lanes.revokedSinceFetch(e.request()));
+        fetched.removeIf(lanes::revokedSinceFetch);
         long unused = granted - accepted.size();
         if (unused > 0) {
             try {
@@ -141,7 +142,7 @@ public final class Intake {
                 LOG.log(System.Logger.Level.WARNING, "Returning unused allowance failed: " + e.getClass().getName());
             }
         }
-        return new IntakeResult(accepted, errors, false);
+        return new IntakeResult(accepted, errors, false, false, fetched);
     }
 
     private void fetchRounds(long granted, List<IncomingRequest> accepted, List<IntakeResult.ImmediateError> errors,
@@ -176,6 +177,31 @@ public final class Intake {
     /** Keeps the group membership alive while the worker is paused or holding a Cycle (consumes nothing). */
     public void keepAlive() {
         lanes.keepAlive();
+    }
+
+    /**
+     * A Cycle failed after intake: hands every kept request back in poll order and returns the allowance units of the
+     * accepted ones (immediate errors used none), like the fetch failure path.
+     */
+    public void abandon(IntakeResult in) {
+        RuntimeException failure = null;
+        try {
+            lanes.release(in.fetched());
+        } catch (RuntimeException e) {
+            failure = e;
+        }
+        try {
+            store.giveBack(in.accepted().size());
+        } catch (RuntimeException e) {
+            if (failure == null) {
+                failure = e;
+            } else {
+                failure.addSuppressed(e);
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
     }
 
     /** See {@link RequestLanes#revokedSinceFetch}. */
