@@ -339,4 +339,24 @@ class IntakeTest {
 
         assertEquals(3, r.accepted().size(), "requests already fetched are not dropped");
     }
+
+    // AC-05 (F11/A3): a failed intake hands records back in fetch order, so the buffer front stays contiguous
+    // and a later Cycle can never commit a lower offset than an earlier one
+    @Test
+    void failedIntakeReleasesMixedRecordsInFetchOrder() {
+        List<IncomingRequest> fetched = new ArrayList<>();
+        fetched.add(new IncomingRequest("high", 0, 10, null, "c10", Map.of(), new byte[1]));
+        for (long o = 11; o <= 16; o++) {
+            fetched.add(new IncomingRequest("high", 0, o, "k" + o, "c" + o, Map.of(), new byte[1]));
+        }
+        lanes.waiting.put("high", fetched);
+        lanes.failOnFetch = 1;
+        try {
+            intake.intake();
+        } catch (IllegalStateException expected) {
+            // second sub-round fails after the first returned malformed p0:10 then accepted p0:11
+        }
+        List<Long> offsets = lanes.released.stream().map(IncomingRequest::position).toList();
+        assertEquals(List.of(10L, 11L, 12L, 13L, 14L, 15L, 16L), offsets, "released in fetch (offset) order, not accepted-then-malformed");
+    }
 }

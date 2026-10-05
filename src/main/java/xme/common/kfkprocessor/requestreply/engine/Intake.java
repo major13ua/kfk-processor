@@ -113,12 +113,12 @@ public final class Intake {
         }
         List<IncomingRequest> accepted = new ArrayList<>();
         List<IntakeResult.ImmediateError> errors = new ArrayList<>();
+        List<IncomingRequest> fetched = new ArrayList<>();
         try {
-            fetchRounds(granted, accepted, errors);
+            fetchRounds(granted, accepted, errors, fetched);
         } catch (RuntimeException | Error e) {
             // nothing fetched so far may be lost (its positions are uncommitted): hand it back and return the units
-            List<IncomingRequest> fetched = new ArrayList<>(accepted);
-            errors.forEach(err -> fetched.add(err.request()));
+            // fetched is in poll order: the buffer front must stay contiguous so no later Cycle commits a lower offset
             try {
                 lanes.release(fetched);
                 store.giveBack(granted);
@@ -140,7 +140,8 @@ public final class Intake {
         return new IntakeResult(accepted, errors, false);
     }
 
-    private void fetchRounds(long granted, List<IncomingRequest> accepted, List<IntakeResult.ImmediateError> errors) {
+    private void fetchRounds(long granted, List<IncomingRequest> accepted, List<IntakeResult.ImmediateError> errors,
+            List<IncomingRequest> fetched) {
         Set<String> busy = laneWeights.keySet();
         while (granted - accepted.size() - errors.size() > 0 && !busy.isEmpty()) {
             Map<String, Integer> quota =
@@ -148,6 +149,7 @@ public final class Intake {
             Map<String, Integer> got = new HashMap<>();
             for (IncomingRequest r : lanes.fetch(quota)) {
                 got.merge(r.lane(), 1, Integer::sum);
+                fetched.add(r);
                 if (r.requestKey() == null || r.correlationId() == null || r.payload() == null
                         || r.payload().length > maxPayloadBytes) {
                     errors.add(new IntakeResult.ImmediateError(

@@ -45,7 +45,7 @@
 
 | # | Task | Status |
 |---|---|---|
-| F11 | Intake releases records in fetch order, one list, contiguity asserted (A3) | todo |
+| F11 | Intake releases records in fetch order, one list, contiguity asserted (A3) | done |
 | F12 | Held or in-flight Cycle does not survive a rebalance (A1) | todo |
 | F13 | Sink recovers from definitive commit failure and epoch abort (A2) | todo |
 | F14 | Demote only the first broker-rejected reply per round (A4) | todo |
