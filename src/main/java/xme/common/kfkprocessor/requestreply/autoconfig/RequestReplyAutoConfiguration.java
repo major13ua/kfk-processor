@@ -162,7 +162,7 @@ public class RequestReplyAutoConfiguration {
         Map<String, Double> weights = new LinkedHashMap<>();
         props.getLanes().forEach(l -> weights.put(l.getName(), l.getWeight()));
         Intake intake = new Intake(store, lanes, state, clock, weights, props.getMinLaneSharePercent() / 100.0,
-                props.getMaxPayloadBytes(), props.getDrawPerRound(), props.getProbeInterval());
+                props.getMaxPayloadBytes(), props.getDrawPerRound(), props.getProbeInterval(), alert);
         @SuppressWarnings("unchecked")
         Function<IncomingRequest, REQ> decoder =
                 r -> (REQ) new String(r.payload(), StandardCharsets.UTF_8);

@@ -109,6 +109,7 @@ class IntakeTest {
     private FakeLanes lanes;
     private WorkerState state;
     private Intake intake;
+    private final List<CommitRetry.Alert> alerts = new ArrayList<>();
     private long seq;
 
     @BeforeEach
@@ -122,7 +123,7 @@ class IntakeTest {
         Map<String, Double> weights = new LinkedHashMap<>();
         weights.put("high", 3.0);
         weights.put("low", 1.0);
-        intake = new Intake(store, lanes, state, clock, weights, 0.05, MAX_BYTES, DRAW, PROBE);
+        intake = new Intake(store, lanes, state, clock, weights, 0.05, MAX_BYTES, DRAW, PROBE, alerts::add);
     }
 
     private IncomingRequest req(String lane) {
@@ -247,6 +248,39 @@ class IntakeTest {
         assertEquals(PauseReason.LIMITER, state.pauseReason());
         assertEquals(1, lanes.pauses);
         assertEquals(5, lanes.waiting.get("high").size());
+    }
+
+    // AC-18: the limiter pause raises one Operator alert per outage (SAD 8, public-api)
+    @Test
+    void limiterPauseAlertsOncePerOutage() {
+        backlog("high", 5);
+        store.down = true;
+        intake.intake();
+        clock.advance(PROBE);
+        intake.intake();
+        assertEquals(1, alerts.size());
+        assertEquals(PauseReason.LIMITER, alerts.get(0).reason());
+        assertEquals("request_reply.rate_budget_store.unavailable", alerts.get(0).faultId());
+        store.down = false;
+        clock.advance(PROBE);
+        intake.intake();
+        store.down = true;
+        clock.advance(PROBE);
+        intake.intake();
+        assertEquals(2, alerts.size());
+    }
+
+    // AC-10b: a flood of malformed requests is bounded by the grant within one intake
+    @Test
+    void malformedFloodIsBoundedByTheGrantPerIntake() {
+        List<IncomingRequest> flood = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) {
+            flood.add(new IncomingRequest("high", 0, i, "k", null, Map.of(), new byte[1]));
+        }
+        lanes.waiting.put("high", flood);
+        IntakeResult r = intake.intake();
+        assertTrue(r.immediateErrors().size() <= DRAW);
+        assertEquals(DRAW, store.returned);
     }
 
     // AC-18: probes until the store is back, resumes within 30 s, budget respected

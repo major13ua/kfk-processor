@@ -9,6 +9,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import xme.common.kfkprocessor.requestreply.api.AllowanceStoreUnavailableException;
 import xme.common.kfkprocessor.requestreply.api.ErrorCategory;
 import xme.common.kfkprocessor.requestreply.api.ErrorReply;
@@ -22,6 +23,8 @@ public final class Intake {
 
     private static final System.Logger LOG = System.getLogger(Intake.class.getName());
 
+    private static final String LIMITER_UNAVAILABLE = "request_reply.rate_budget_store.unavailable";
+
     private final AllowanceStore store;
     private final RequestLanes lanes;
     private final WorkerState state;
@@ -31,6 +34,7 @@ public final class Intake {
     private final long maxPayloadBytes;
     private final int drawPerRound;
     private final Duration probeInterval;
+    private final Consumer<CommitRetry.Alert> alert;
     private final Map<String, Double> laneCredit = new HashMap<>();
     private boolean paused;
     private Instant lastAttempt;
@@ -45,6 +49,22 @@ public final class Intake {
             long maxPayloadBytes,
             int drawPerRound,
             Duration probeInterval) {
+        this(store, lanes, state, clock, laneWeights, minLaneShare, maxPayloadBytes, drawPerRound, probeInterval,
+                a -> { });
+    }
+
+    public Intake(
+            AllowanceStore store,
+            RequestLanes lanes,
+            WorkerState state,
+            Clock clock,
+            Map<String, Double> laneWeights,
+            double minLaneShare,
+            long maxPayloadBytes,
+            int drawPerRound,
+            Duration probeInterval,
+            Consumer<CommitRetry.Alert> alert) {
+        this.alert = alert;
         this.store = store;
         this.lanes = lanes;
         this.state = state;
@@ -74,6 +94,7 @@ public final class Intake {
                 paused = true;
                 state.pause(PauseReason.LIMITER);
                 lanes.pause();
+                alert.accept(new CommitRetry.Alert(PauseReason.LIMITER, LIMITER_UNAVAILABLE));
             }
             return paused();
         }
@@ -121,9 +142,9 @@ public final class Intake {
 
     private void fetchRounds(long granted, List<IncomingRequest> accepted, List<IntakeResult.ImmediateError> errors) {
         Set<String> busy = laneWeights.keySet();
-        while (granted - accepted.size() > 0 && !busy.isEmpty()) {
+        while (granted - accepted.size() - errors.size() > 0 && !busy.isEmpty()) {
             Map<String, Integer> quota =
-                    LaneShares.split(laneWeights, minLaneShare, busy, (int) (granted - accepted.size()), laneCredit);
+                    LaneShares.split(laneWeights, minLaneShare, busy, (int) (granted - accepted.size() - errors.size()), laneCredit);
             Map<String, Integer> got = new HashMap<>();
             for (IncomingRequest r : lanes.fetch(quota)) {
                 got.merge(r.lane(), 1, Integer::sum);
