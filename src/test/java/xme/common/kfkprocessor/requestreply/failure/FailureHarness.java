@@ -85,10 +85,15 @@ public final class FailureHarness {
     /** Fresh names per test: requests topic, replies topic, group, identity. Topics are created. */
     public record Ids(String requests, String replies, String group, String identity) {
         public static Ids fresh() {
+            return fresh(1);
+        }
+
+        /** As {@link #fresh()}, with {@code requestPartitions} partitions on the requests topic (replies: one). */
+        public static Ids fresh(int requestPartitions) {
             String id = UUID.randomUUID().toString().substring(0, 8);
             Ids ids = new Ids("req-" + id, "rep-" + id, "grp-" + id, "worker-" + id);
             try (Admin admin = admin()) {
-                admin.createTopics(List.of(new NewTopic(ids.requests, 1, (short) 1),
+                admin.createTopics(List.of(new NewTopic(ids.requests, requestPartitions, (short) 1),
                         new NewTopic(ids.replies, 1, (short) 1))).all().get(30, TimeUnit.SECONDS);
                 awaitTopicReady(admin, ids.requests);
                 awaitTopicReady(admin, ids.replies);
@@ -214,6 +219,13 @@ public final class FailureHarness {
     /** Sends one request per correlation id, in list order, with the Request Key {@code requestKey(correlationId)}. */
     public static void produce(String topic, List<String> correlationIds,
             java.util.function.Function<String, String> requestKey) {
+        produce(topic, correlationIds, requestKey, id -> null);
+    }
+
+    /** As above, each request to the partition {@code partitionOf(correlationId)} (null: the producer chooses). */
+    public static void produce(String topic, List<String> correlationIds,
+            java.util.function.Function<String, String> requestKey,
+            java.util.function.Function<String, Integer> partitionOf) {
         try (var producer = new KafkaProducer<byte[], byte[]>(Map.<String, Object>of(
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName(),
@@ -226,7 +238,7 @@ public final class FailureHarness {
                 ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 180_000))) {
             java.util.concurrent.atomic.AtomicReference<Exception> failed = new java.util.concurrent.atomic.AtomicReference<>();
             for (String id : correlationIds) {
-                var rec = new ProducerRecord<byte[], byte[]>(topic, null, ("req-" + id).getBytes(StandardCharsets.UTF_8));
+                var rec = new ProducerRecord<byte[], byte[]>(topic, partitionOf.apply(id), null, ("req-" + id).getBytes(StandardCharsets.UTF_8));
                 rec.headers().add(new RecordHeader("correlation_id", id.getBytes(StandardCharsets.UTF_8)));
                 rec.headers().add(new RecordHeader("request_key", requestKey.apply(id).getBytes(StandardCharsets.UTF_8)));
                 rec.headers().add(new RecordHeader("created_at", java.time.Instant.now().toString().getBytes(StandardCharsets.UTF_8)));

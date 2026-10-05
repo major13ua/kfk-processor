@@ -257,6 +257,56 @@ class RequestReplyAutoConfigurationTest {
         });
     }
 
+    @Configuration(proxyBeanMethods = false)
+    static class PortsWithoutStoreConfig {
+        @Bean RequestLanes lanes() { return LANES; }
+        @Bean ReplySink sink() { return SINK; }
+        @Bean DestinationProbe probe() { return PROBE; }
+    }
+
+    // review r3 Group C: refusal code when the default allowance store has no Redis URI and no bean replaces it
+    @Test
+    void missingAllowanceStoreRefusesStartWithItsCode() {
+        runner().withUserConfiguration(HandlerConfig.class, PortsWithoutStoreConfig.class).run(ctx -> {
+            assertThat(ctx).hasFailed();
+            assertThat(rootCause(ctx.getStartupFailure()))
+                    .isInstanceOfSatisfying(ConfigurationRefusedException.class, e -> {
+                        assertThat(e.code()).isEqualTo("request_reply.config.allowance_store_missing");
+                        assertThat(e.getMessage()).contains("xme.request-reply.allowance-store.redis-uri");
+                    });
+        });
+    }
+
+    @Test
+    void blankAllowanceStoreUriIsRefusedLikeAMissingOne() {
+        runner("xme.request-reply.allowance-store.redis-uri= ")
+                .withUserConfiguration(HandlerConfig.class, PortsWithoutStoreConfig.class).run(ctx -> {
+                    assertThat(ctx).hasFailed();
+                    assertThat(rootCause(ctx.getStartupFailure()))
+                            .isInstanceOfSatisfying(ConfigurationRefusedException.class,
+                                    e -> assertThat(e.code()).isEqualTo("request_reply.config.allowance_store_missing"));
+                });
+    }
+
+    // review r3 Group C: spring.kafka.ssl.bundle names a bundle but the host has no SslBundles bean
+    @Test
+    void sslBundleWithoutSslBundlesBeanRefusesStartWithItsCode() {
+        runner("spring.kafka.ssl.bundle=missing-bundle")
+                .withUserConfiguration(HandlerConfig.class, StoreOnlyConfig.class).run(ctx -> {
+                    assertThat(ctx).hasFailed();
+                    assertThat(rootCause(ctx.getStartupFailure()))
+                            .isInstanceOfSatisfying(ConfigurationRefusedException.class, e -> {
+                                assertThat(e.code()).isEqualTo("request_reply.config.ssl_bundles_missing");
+                                assertThat(e.getMessage()).contains("spring.kafka.ssl.bundle");
+                            });
+                });
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class StoreOnlyConfig {
+        @Bean AllowanceStore store() { return STORE; }
+    }
+
     private static Throwable rootCause(Throwable t) {
         while (t.getCause() != null) {
             t = t.getCause();

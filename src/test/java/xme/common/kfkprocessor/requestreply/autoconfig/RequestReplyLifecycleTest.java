@@ -57,13 +57,28 @@ class RequestReplyLifecycleTest {
             throw new ReplyDestinationFault.PermissionDenied("no WRITE", null);
         }, state, a -> { }, Duration.ofMillis(200), true);
 
+        long started = System.nanoTime();
         lifecycle.start();
-        Thread.sleep(500);
+        waitFor("a keep-alive and a second probe", Duration.ofSeconds(10),
+                () -> lanes.keepAlives.get() >= 1 && probes.get() >= 2);
+        long elapsedMs = Duration.ofNanos(System.nanoTime() - started).toMillis();
         lifecycle.stop();
 
         assertEquals(0, lanes.fetches.get(), "the gate does not fetch (no records can be buffered while denied)");
         assertTrue(lanes.keepAlives.get() >= 1, "membership kept alive, was " + lanes.keepAlives.get());
-        assertTrue(lanes.keepAlives.get() <= 50, "no busy spin: " + lanes.keepAlives.get() + " keep-alive rounds in 0.5 s");
+        assertTrue(lanes.keepAlives.get() <= 10 + elapsedMs / 10,
+                "no busy spin: " + lanes.keepAlives.get() + " keep-alive rounds in " + elapsedMs + " ms");
         assertTrue(probes.get() >= 2, "probed again on the probe interval, was " + probes.get());
+    }
+
+    private static void waitFor(String what, Duration timeout, java.util.function.BooleanSupplier condition)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("timed out after " + timeout + " waiting for " + what);
+            }
+            Thread.sleep(10);
+        }
     }
 }

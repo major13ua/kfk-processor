@@ -303,4 +303,43 @@ class KafkaReplySinkIT {
         assertEquals(expected.stream().sorted().toList(), committed.stream().sorted().toList());
         assertEquals(51L, groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset());
     }
+
+    private static final int AHEAD = 40;
+
+    // AC-08, review r3 Group C: the rejected reply sits mid-batch, not at index 0. Spec section 8 (F14 residual)
+    // allows good replies ahead of it to be answered with an undeliverable Error Reply; on this broker the producer
+    // splits the rejected batch and resends, so they are delivered. Either way the invariants below hold: one
+    // committed reply per request, every reported failure matches what the Requester sees, positions committed.
+    @Test
+    void midBatchBrokerRejectedReplyKeepsOneCommittedReplyPerRequestAndReportsExactlyTheSubstitutedOnes() throws Exception {
+        var env = Env.create(8000);
+        var replies = new ArrayList<ReplyRecord>();
+        for (int i = 0; i < AHEAD; i++) {
+            replies.add(new ReplyRecord("high", 0, i, "ok-" + i, "key-ok-" + i, b("v" + i + PAD), false,
+                    b("undeliverable-ok-" + i)));
+        }
+        replies.add(new ReplyRecord("high", 0, AHEAD, "big", "key-big", new byte[9000], false, b("undeliverable-big")));
+        for (int i = AHEAD + 1; i < AHEAD + 11; i++) {
+            replies.add(new ReplyRecord("high", 0, i, "ok-" + i, "key-ok-" + i, b("v" + i + PAD), false,
+                    b("undeliverable-ok-" + i)));
+        }
+        CommitResult r;
+        try (var sink = env.sink()) {
+            r = sink.commit(replies);
+        }
+        var failed = r.failures().stream().map(CommitResult.ReplyFailure::correlationId).toList();
+        assertTrue(failed.contains("big"), "the rejected reply is a failure: " + failed);
+        var expected = new ArrayList<String>();
+        for (ReplyRecord rep : replies) {
+            boolean substituted = failed.contains(rep.correlationId());
+            expected.add(rep.correlationId() + "=" + new String(substituted ? rep.fallback() : rep.value(),
+                    StandardCharsets.UTF_8));
+        }
+        var committed = committedRepliesWithValues(env, Duration.ofSeconds(8));
+        assertEquals(replies.size(), committed.size(), "one committed reply per request");
+        assertEquals(expected.stream().sorted().toList(), committed.stream().sorted().toList(),
+                "what the Requesters see matches the reported failures");
+        assertEquals(List.of("big"), failed, "only the rejected reply is substituted (good replies ahead of it survive)");
+        assertEquals((long) replies.size(), groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset());
+    }
 }

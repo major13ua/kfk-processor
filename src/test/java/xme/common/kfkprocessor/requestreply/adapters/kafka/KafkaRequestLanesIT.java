@@ -315,4 +315,32 @@ class KafkaRequestLanesIT {
             assertTrue(max <= 200, "surplus buffer grew to " + max);
         }
     }
+
+    // AC-10b, review r3 Group C: the bound is per partition (quota check and max.poll.records), so it scales with the
+    // number of partitions the worker owns; it must not grow with the backlog.
+    @Test
+    void surplusBufferStaysBoundedPerPartitionWhileOneLaneIsIdleOnSeveralPartitions() throws Exception {
+        final int partitions = 3;
+        var env = Env.create(partitions);
+        for (int p = 0; p < partitions; p++) {
+            var corrs = new String[1500];
+            for (int i = 0; i < corrs.length; i++) {
+                corrs[i] = "s" + p + "-" + i;
+            }
+            produce(env.high(), p, corrs);
+        }
+        try (var w = worker(env, "worker-" + env.group(), new Metrics())) {
+            int max = 0;
+            long end = System.nanoTime() + Duration.ofSeconds(60).toNanos();
+            int fetched = 0;
+            while (fetched < 300 && System.nanoTime() < end) {
+                if (w.awaitAvailable()) {
+                    fetched += w.fetch(Map.of("high", 5, "low", 5)).size();
+                }
+                max = Math.max(max, w.bufferedCount());
+            }
+            assertTrue(fetched >= 300, "fetched " + fetched);
+            assertTrue(max <= 200 * partitions, "surplus buffer grew to " + max + " on " + partitions + " partitions");
+        }
+    }
 }
