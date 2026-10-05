@@ -992,6 +992,26 @@
         "src/test/java/xme/common/kfkprocessor/requestreply"
       ],
       "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r6.md"
+    },
+    {
+      "id": "F37",
+      "title": "Docs and test hardening after F35: ReplySink javadoc and spec rule wording, bounded get() verified, test-plan names and citations (r7 H2-H4)",
+      "layer": "docs",
+      "deps": [
+        "F36"
+      ],
+      "acs": [
+        "AC-08",
+        "AC-08b",
+        "AC-09"
+      ],
+      "dod": "ReplySink.java javadoc and spec.md:279 state the rule: an all-InvalidRecordException round containing any reply on its last stage, including a no-fallback reply and a single-reply Cycle, is a destination fault; section 8 states the single-reply case. Timed-out describe test verifies get(long, TimeUnit) is used (verify or AssertionError on get()). test-plan rows 57-58 use the full test name and cite timedOutConfigDescribeDoesNotRefuse, configWithoutCleanupPolicyEntryDoesNotRefuse, cleanupPolicyEntryWithNullValueDoesNotRefuse and the mixed guard test.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/ports/ReplySink.java",
+        "src/test/java/xme/common/kfkprocessor/requestreply/autoconfig",
+        "docs/features/kafka-request-reply"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r7.md"
     }
   ]
 }

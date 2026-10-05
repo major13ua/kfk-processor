@@ -91,3 +91,9 @@
 |---|---|---|
 | F35 | Sink: all-rejected round of no-fallback Error Replies pauses without loss (G1) | done |
 | F36 | Tests: config-describe failure, absent cleanup.policy, sibling fake message (G4) | done |
+
+## Review follow-ups round 7 (from `_review/review-2026-10-05-r7.md`)
+
+| # | Task | Status |
+|---|---|---|
+| F37 | Docs and test hardening after F35: javadoc and spec rule wording, bounded get() verified, test-plan names (H2-H4) | todo |
