@@ -240,7 +240,7 @@ public final class CycleLoop<K, REQ, RES> {
         if (dropped > 0) {
             LOG.log(System.Logger.Level.ERROR, dropped + " reply(ies) have no deliverable fallback and were dropped ("
                     + REPLY_UNDELIVERABLE + ")");
-            alert.accept(new CommitRetry.Alert(WorkerState.PauseReason.DESTINATION, REPLY_UNDELIVERABLE));
+            alert.accept(CommitRetry.Alert.fault(REPLY_UNDELIVERABLE));
         }
     }
 
@@ -248,13 +248,13 @@ public final class CycleLoop<K, REQ, RES> {
         Set<String> undelivered = new HashSet<>();
         for (CommitResult.ReplyFailure f : commit.failures()) {
             if (!f.substituted()) {
-                undelivered.add(f.correlationId());
+                undelivered.add(f.lane() + ":" + f.partition() + ":" + f.position());
             }
         }
         Instant now = clock.instant();
         for (HandlerResult<K, RES> r : results) {
             IncomingRequest q = r.request();
-            if (undelivered.contains(q.correlationId())) {
+            if (undelivered.contains(q.lane() + ":" + q.partition() + ":" + q.position())) {
                 continue;
             }
             Duration lag = Duration.between(createdAt.apply(q), now);

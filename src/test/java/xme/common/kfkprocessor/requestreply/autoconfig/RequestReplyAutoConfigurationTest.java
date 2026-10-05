@@ -228,6 +228,35 @@ class RequestReplyAutoConfigurationTest {
         });
     }
 
+    // review r3 Group D: a fault alert without pause reason (dropped reply) is not logged as "paused"
+    @Test
+    @SuppressWarnings("unchecked")
+    void alertWithoutPauseReasonIsNotLoggedAsPaused() {
+        runner().withUserConfiguration(HandlerConfig.class, PortsConfig.class).run(ctx -> {
+            java.util.function.Consumer<xme.common.kfkprocessor.requestreply.engine.CommitRetry.Alert> listener =
+                    (java.util.function.Consumer<xme.common.kfkprocessor.requestreply.engine.CommitRetry.Alert>)
+                            ctx.getBean("requestReplyAlertListener");
+            List<java.util.logging.LogRecord> logs = new java.util.concurrent.CopyOnWriteArrayList<>();
+            java.util.logging.Logger jul = java.util.logging.Logger.getLogger(
+                    "xme.common.kfkprocessor.requestreply.autoconfig.RequestReplyAutoConfiguration");
+            java.util.logging.Handler capture = new java.util.logging.Handler() {
+                @Override public void publish(java.util.logging.LogRecord r) { logs.add(r); }
+                @Override public void flush() { }
+                @Override public void close() { }
+            };
+            jul.addHandler(capture);
+            try {
+                listener.accept(xme.common.kfkprocessor.requestreply.engine.CommitRetry.Alert
+                        .fault("request_reply.reply.undeliverable"));
+            } finally {
+                jul.removeHandler(capture);
+            }
+            assertThat(logs).hasSize(1);
+            assertThat(logs.get(0).getMessage()).contains("request_reply.reply.undeliverable")
+                    .doesNotContain("paused");
+        });
+    }
+
     private static Throwable rootCause(Throwable t) {
         while (t.getCause() != null) {
             t = t.getCause();

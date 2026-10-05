@@ -24,6 +24,7 @@ import xme.common.kfkprocessor.requestreply.engine.WorkerState.Status;
 import xme.common.kfkprocessor.requestreply.ports.AllowanceStore;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult;
 import xme.common.kfkprocessor.requestreply.ports.DestinationProbe;
+import xme.common.kfkprocessor.requestreply.ports.GroupMembershipChanged;
 import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
 import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
 import xme.common.kfkprocessor.requestreply.ports.ReplyRecord;
@@ -706,5 +707,164 @@ class CycleLoopTest {
         assertEquals(boom, thrown);
         assertTrue(java.util.Arrays.asList(thrown.getSuppressed()).contains(releaseFailure));
         assertEquals(1, alerts.size());
+    }
+
+    // ---- review r3 Group C/D (F23) ----
+
+    private static IncomingRequest at(String lane, int partition, long position, String corr) {
+        return new IncomingRequest(lane, partition, position, "key-" + partition + "-" + position, corr, Map.of(),
+                "p".getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** CommitRetry wired like production: keep-alive poll and revoked-since-fetch hooks on the lanes. */
+    private void retryWithMembershipHooks(int attempts) {
+        CycleCommitter<String, String> committer = new CycleCommitter<>(sink,
+                r -> ("reply|" + r.correlationId() + "|" + r.data()).getBytes(StandardCharsets.UTF_8),
+                e -> ("error|" + e.category()).getBytes(StandardCharsets.UTF_8));
+        retry = new CommitRetry<>(committer, probe, state, clock, PROBE, attempts, alerts::add, metrics,
+                lanes::keepAlive, r -> lanes.revokedSinceFetch(r.request()));
+    }
+
+    // F22 follow-up (coverage, expected to pass): repeated rebalance rejections beyond the attempts end in the loop's
+    // hand-back + request_reply.cycle.failed, no pause, no destination alert, the exception reaches the caller
+    @Test
+    void repeatedGroupMembershipChangedBeyondAttemptsHandsRequestsBackAndAlertsCycleFailed() {
+        retryWithMembershipHooks(2);
+        IncomingRequest a = reqText("high", "a");
+        IncomingRequest b = reqText("high", "b");
+        lanes.waiting.addAll(List.of(a, b));
+        GroupMembershipChanged rebalanced = new GroupMembershipChanged("rebalanced", null);
+        sink.failWith = rebalanced;
+
+        GroupMembershipChanged thrown = org.junit.jupiter.api.Assertions.assertThrows(
+                GroupMembershipChanged.class, loopWithAlerts()::runOnce);
+
+        assertEquals(rebalanced, thrown);
+        assertEquals(List.of(List.of(a, b)), lanes.released, "every fetched request handed back once, in poll order");
+        assertEquals(1, alerts.size());
+        assertEquals("request_reply.cycle.failed", alerts.get(0).faultId());
+        assertEquals(null, alerts.get(0).reason(), "a Cycle failure is not a pause");
+        assertEquals(null, state.pauseReason());
+        assertFalse(retry.holding());
+    }
+
+    // review r3 Group C (coverage, current design): a fence on the first commit pauses DESTINATION, alerts
+    // reply_destination.fenced once, holds the results; Handlers are not re-run
+    @Test
+    void fencedCommitHoldsTheCyclePausesDestinationAndAlertsFencedOnce() {
+        IncomingRequest q = reqText("high", "a");
+        lanes.waiting.add(q);
+        int[] handlerCalls = {0};
+        handler = (ctx, req) -> { handlerCalls[0]++; return "re:" + req; };
+        sink.failWith = new ReplyDestinationFault.Fenced("fenced", null);
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+
+        assertEquals(CycleLoop.Iteration.HELD, loop.runOnce());
+
+        assertEquals(1, alerts.size());
+        assertEquals("request_reply.reply_destination.fenced", alerts.get(0).faultId());
+        assertEquals(PauseReason.DESTINATION, alerts.get(0).reason());
+        assertEquals(PauseReason.DESTINATION, state.pauseReason());
+        assertTrue(retry.holding());
+        assertTrue(sink.commits.isEmpty());
+
+        // still fenced on the probe retry: stays paused and held, nothing is committed, Handlers never re-run
+        clock.advance(PROBE.plusSeconds(1));
+        assertEquals(CycleLoop.Iteration.PAUSED, loop.runOnce());
+        assertTrue(retry.holding());
+        assertEquals(PauseReason.DESTINATION, state.pauseReason());
+        assertTrue(sink.commits.isEmpty());
+        assertEquals(1, handlerCalls[0]);
+    }
+
+    // review r3 Group C: a throwing keep-alive poll on zero grant must not break the loop: IDLE, no throw, no alert
+    @Test
+    void zeroGrantKeepAliveThatThrowsIsSwallowedAndTheIterationIsIdle() {
+        store.grantCap = 0L;
+        lanes.waiting.add(reqText("high", "a"));
+        lanes.onKeepAlive = () -> { throw new IllegalStateException("poll failed"); };
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+
+        assertEquals(CycleLoop.Iteration.IDLE, loop.runOnce());
+
+        assertEquals(1, lanes.keepAlives);
+        assertEquals(0, lanes.fetches);
+        assertTrue(alerts.isEmpty());
+        assertEquals(null, state.pauseReason());
+        assertEquals(Status.RUNNING, state.evaluate(), "backlog still pending, not reported idle");
+    }
+
+    // review r3 Group C (coverage): undeliverable counting and alert also apply when the Cycle commits after a hold
+    @Test
+    void undeliverableRepliesOfACycleCommittedAfterAHoldAreCountedAndAlerted() {
+        IncomingRequest dropped = reqText("high", "a");
+        IncomingRequest substituted = reqText("high", "b");
+        IncomingRequest fine = reqText("high", "c");
+        lanes.waiting.addAll(List.of(dropped, substituted, fine));
+        sink.failWith = new ReplyDestinationFault.Unavailable("down", null);
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+        assertEquals(CycleLoop.Iteration.HELD, loop.runOnce());
+        alerts.clear();
+
+        sink.failWith = null;
+        sink.answer = new CommitResult(List.of(
+                new CommitResult.ReplyFailure(dropped.lane(), dropped.partition(), dropped.position(),
+                        dropped.correlationId(), CommitResult.Reason.REJECTED, false),
+                new CommitResult.ReplyFailure(substituted.lane(), substituted.partition(), substituted.position(),
+                        substituted.correlationId(), CommitResult.Reason.TOO_LARGE, true)));
+        clock.advance(PROBE.plusSeconds(1));
+        assertEquals(CycleLoop.Iteration.COMMITTED, loop.runOnce());
+
+        assertEquals(2, metrics.errorReplies.stream().filter(c -> c == ErrorCategory.UNDELIVERABLE).count(),
+                "one per undeliverable reply, substituted or dropped");
+        assertEquals(1, alerts.size(), "one alert for the dropped reply");
+        assertTrue(alerts.get(0).faultId().toLowerCase().contains("undeliverable"));
+        assertEquals(2, metrics.lags.size(), "lag for the substituted and the plain reply, not the dropped one");
+    }
+
+    // review r3 Group D (expected RED): the dropped-reply alert is a fault, not a pause: no PauseReason
+    @Test
+    void droppedReplyAlertIsAFaultWithoutPauseReason() {
+        IncomingRequest q = reqText("high", "a");
+        lanes.waiting.add(q);
+        sink.answer = new CommitResult(List.of(new CommitResult.ReplyFailure(
+                q.lane(), q.partition(), q.position(), q.correlationId(), CommitResult.Reason.REJECTED, false)));
+
+        loopWithAlerts().runOnce();
+
+        assertEquals(1, alerts.size());
+        assertEquals("request_reply.reply.undeliverable", alerts.get(0).faultId());
+        assertEquals(null, alerts.get(0).reason(), "no PauseReason.DESTINATION: the worker is not paused");
+        assertEquals(null, state.pauseReason());
+    }
+
+    // review r3 Group D (expected RED): Consistency Lag skips are keyed by lane:partition:position, so a delivered
+    // reply sharing a correlationId with a dropped one still gets its lag
+    @Test
+    void lagSkipForADroppedReplyDoesNotSuppressAnotherRequestWithTheSameCorrelationId() {
+        IncomingRequest dropped = at("high", 0, 1, "dup");
+        IncomingRequest delivered = at("high", 0, 2, "dup");
+        lanes.waiting.addAll(List.of(dropped, delivered));
+        sink.answer = new CommitResult(List.of(new CommitResult.ReplyFailure(
+                dropped.lane(), dropped.partition(), dropped.position(), "dup", CommitResult.Reason.REJECTED, false)));
+
+        loopWithAlerts().runOnce();
+
+        assertEquals(1, metrics.lags.size(), "exactly the delivered request (position 2) records a lag");
+    }
+
+    // review r3 Group D (expected RED): malformed requests have a null correlationId; the dropped reply of one must
+    // not suppress the lag of another delivered request with a null correlationId
+    @Test
+    void lagSkipForADroppedReplyDoesNotSuppressAnotherRequestWithNullCorrelationId() {
+        IncomingRequest dropped = at("high", 0, 1, null);
+        IncomingRequest delivered = at("high", 1, 1, null);
+        lanes.waiting.addAll(List.of(dropped, delivered));
+        sink.answer = new CommitResult(List.of(new CommitResult.ReplyFailure(
+                dropped.lane(), dropped.partition(), dropped.position(), null, CommitResult.Reason.REJECTED, false)));
+
+        loopWithAlerts().runOnce();
+
+        assertEquals(1, metrics.lags.size(), "the delivered request on partition 1 records a lag");
     }
 }
