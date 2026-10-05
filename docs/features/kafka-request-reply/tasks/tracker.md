@@ -40,3 +40,16 @@
 | F8 | Per-lane key chains (B11) | done |
 | F9 | Test gaps (Group D) | done |
 | F10 | Spec drift + stage-2 docs (Group C) | done |
+
+## Review follow-ups round 2 (from `_review/review-2026-10-05-r2.md`)
+
+| # | Task | Status |
+|---|---|---|
+| F11 | Intake releases records in fetch order, one list, contiguity asserted (A3) | todo |
+| F12 | Held or in-flight Cycle does not survive a rebalance (A1) | todo |
+| F13 | Sink recovers from definitive commit failure and epoch abort (A2) | todo |
+| F14 | Demote only the first broker-rejected reply per round (A4) | todo |
+| F15 | Zero grant with a backlog keeps the member alive (B5) | todo |
+| F16 | Propagate KafkaConnectionDetails and SslBundles to consumer, producer, Admin probe (B6) | todo |
+| F17 | Count substituted fallbacks as UNDELIVERABLE and surface dropped replies (B7) | todo |
+| F18 | Close review r2 Group C and cheap Group D items | todo |

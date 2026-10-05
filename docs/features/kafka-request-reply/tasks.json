@@ -44,7 +44,7 @@
         "AC-02",
         "AC-15"
       ],
-      "dod": "A misconfigured worker (conflicting timings, weight \u2264 0, no Handler, no identity) refuses to start with a message naming the conflict.",
+      "dod": "A misconfigured worker (conflicting timings, weight ≤ 0, no Handler, no identity) refuses to start with a message naming the conflict.",
       "files_hint": [
         "src/main/java/xme/common/kfkprocessor/requestreply/api/RequestReplyProperties.java",
         "src/main/java/xme/common/kfkprocessor/requestreply/autoconfig/StartupValidator.java"
@@ -62,7 +62,7 @@
         "AC-10",
         "AC-18"
       ],
-      "dod": "Two clients on one Redis-compatible store never take more than the Rate Budget (\u00d7 1.10) in a sliding second, and an unreachable store raises the fail-closed exception.",
+      "dod": "Two clients on one Redis-compatible store never take more than the Rate Budget (× 1.10) in a sliding second, and an unreachable store raises the fail-closed exception.",
       "files_hint": [
         "src/main/java/xme/common/kfkprocessor/requestreply/adapters/allowance/",
         "build.gradle"
@@ -301,7 +301,7 @@
         "AC-12",
         "AC-14"
       ],
-      "dod": "Rolling restart shows 0 reassignments, accepted rate stays within budget \u00d7 1.10, lanes stay within \u00b110 points, throughput is measured against 2,000 requests/s.",
+      "dod": "Rolling restart shows 0 reassignments, accepted rate stays within budget × 1.10, lanes stay within ±10 points, throughput is measured against 2,000 requests/s.",
       "files_hint": [
         "src/test/java/xme/common/kfkprocessor/requestreply/performance/"
       ],
@@ -503,7 +503,7 @@
     },
     {
       "id": "F10",
-      "title": "Spec drift: record x1.10 decision, align spec \u00a78 / test-plan / guide (Group C) and cheap stage-2 items",
+      "title": "Spec drift: record x1.10 decision, align spec §8 / test-plan / guide (Group C) and cheap stage-2 items",
       "layer": "docs",
       "deps": [
         "F9"
@@ -516,6 +516,156 @@
         "docs/features/kafka-request-reply/"
       ],
       "file": "docs/features/kafka-request-reply/_review/review-2026-10-05.md"
+    },
+    {
+      "id": "F11",
+      "title": "Intake releases records in fetch order, one list, contiguity asserted (A3)",
+      "layer": "engine",
+      "deps": [
+        "F10"
+      ],
+      "acs": [
+        "AC-05"
+      ],
+      "dod": "Committed offset never goes backward across Cycles; RED test with mixed accepted and malformed records on one partition.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/Intake.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaRequestLanes.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaReplySink.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r2.md"
+    },
+    {
+      "id": "F12",
+      "title": "Held or in-flight Cycle does not survive a rebalance (A1)",
+      "layer": "infra",
+      "deps": [
+        "F11"
+      ],
+      "acs": [
+        "AC-05",
+        "AC-08b",
+        "AC-09"
+      ],
+      "dod": "Results of revoked partitions are dropped, retained partitions are re-seeked after a held commit, CooperativeStickyAssignor; IT: hold, rebalance, restore gives one committed reply per request.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaRequestLanes.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaReplySink.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CycleLoop.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/Intake.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/autoconfig/RequestReplyAutoConfiguration.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r2.md"
+    },
+    {
+      "id": "F13",
+      "title": "Sink recovers from definitive commit failure and epoch abort (A2)",
+      "layer": "infra",
+      "deps": [
+        "F12"
+      ],
+      "acs": [
+        "AC-08b",
+        "AC-05"
+      ],
+      "dod": "Pending cycle is cleared and re-sent in a fresh transaction on non-timeout failure; InvalidProducerEpoch is abortable; real fence is its own alert; RecoveryTest with failing second commit; real-broker outage longer than transaction timeout.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaReplySink.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CommitRetry.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r2.md"
+    },
+    {
+      "id": "F14",
+      "title": "Demote only the first broker-rejected reply per round (A4)",
+      "layer": "infra",
+      "deps": [
+        "F13"
+      ],
+      "acs": [
+        "AC-08"
+      ],
+      "dod": "Collateral replies are re-sent unchanged; IT with about 50 replies after one oversized reply.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaReplySink.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r2.md"
+    },
+    {
+      "id": "F15",
+      "title": "Zero grant with a backlog keeps the member alive (B5)",
+      "layer": "engine",
+      "deps": [
+        "F14"
+      ],
+      "acs": [
+        "AC-17",
+        "AC-14"
+      ],
+      "dod": "IntakeResult.available and keepAlive on zero-grant iterations; no RUNNING-with-no-lag stall.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/Intake.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CycleLoop.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/WorkerState.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaRequestLanes.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r2.md"
+    },
+    {
+      "id": "F16",
+      "title": "Propagate KafkaConnectionDetails and SslBundles to consumer, producer, Admin probe (B6)",
+      "layer": "wiring",
+      "deps": [
+        "F15"
+      ],
+      "acs": [
+        "AC-09"
+      ],
+      "dod": "Test with an SSL bundle; handshake failure pauses and alerts instead of looping.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/autoconfig/RequestReplyAutoConfiguration.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r2.md"
+    },
+    {
+      "id": "F17",
+      "title": "Count substituted fallbacks as UNDELIVERABLE and surface dropped replies (B7)",
+      "layer": "engine",
+      "deps": [
+        "F16"
+      ],
+      "acs": [
+        "AC-08"
+      ],
+      "dod": "Metric, log and alert for a reply with no deliverable fallback.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine/CycleLoop.java",
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaReplySink.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r2.md"
+    },
+    {
+      "id": "F18",
+      "title": "Close review r2 Group C and cheap Group D items",
+      "layer": "tests",
+      "deps": [
+        "F17"
+      ],
+      "acs": [
+        "AC-05",
+        "AC-07c",
+        "AC-10",
+        "AC-12",
+        "AC-13",
+        "AC-19"
+      ],
+      "dod": "Group C test and spec gaps closed, cheap Group D items fixed, deferred items already logged in spec section 8.",
+      "files_hint": [
+        "src/test/",
+        "src/main/",
+        "docs/"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r2.md"
     }
   ]
 }
