@@ -54,6 +54,18 @@ class WorkerStateTest {
         assertEquals(List.of(), published.stream().filter(s -> s == WorkerMetrics.State.STALLED).toList());
     }
 
+    // AC-17 (A5): the stall clock starts when work arrives, not at the last commit before a long idle
+    @Test
+    void firstWorkAfterLongIdle_isRunningNotStalled() {
+        clock.advance(Duration.ofMinutes(10));
+        state.setPendingWork(true);
+        state.setCycleOpen(true);
+        assertEquals(Status.RUNNING, state.evaluate());
+        assertEquals(false, published.contains(WorkerMetrics.State.STALLED));
+        clock.advance(Duration.ofSeconds(61));
+        assertEquals(Status.STALLED, state.evaluate());
+    }
+
     @Test
     void pendingWorkWithinThreshold_isRunning() {
         state.setPendingWork(true);

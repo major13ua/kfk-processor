@@ -34,13 +34,26 @@ public final class WorkerState {
     }
 
     public synchronized void setPendingWork(boolean pending) {
+        startStallClockIfLeavingIdle(pending);
         this.pendingWork = pending;
         evaluate();
     }
 
     public synchronized void setCycleOpen(boolean open) {
+        startStallClockIfLeavingIdle(open);
         this.cycleOpen = open;
         evaluate();
+    }
+
+    public Duration stallThreshold() {
+        return stallThreshold;
+    }
+
+    /** Idle time is not stall time: the clock restarts when work arrives on an idle, unpaused worker. */
+    private void startStallClockIfLeavingIdle(boolean becomingBusy) {
+        if (becomingBusy && !pendingWork && !cycleOpen && pauses.isEmpty()) {
+            lastCommit = clock.instant();
+        }
     }
 
     public synchronized void pause(PauseReason reason) {

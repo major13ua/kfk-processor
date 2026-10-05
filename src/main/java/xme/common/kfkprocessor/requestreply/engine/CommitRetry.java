@@ -9,6 +9,7 @@ import java.util.function.Consumer;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult;
 import xme.common.kfkprocessor.requestreply.ports.DestinationProbe;
 import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
+import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
 
 /**
  * Retries a failed Cycle commit with the same results, and on exhaustion or destination fault pauses the worker,
@@ -30,12 +31,19 @@ public final class CommitRetry<K, RES> {
     private final Duration probeInterval;
     private final int attempts;
     private final Consumer<Alert> alert;
+    private final WorkerMetrics metrics;
     private List<HandlerResult<K, RES>> held;
     private WorkerState.PauseReason heldReason;
     private Instant lastProbe;
 
     public CommitRetry(CycleCommitter<K, RES> committer, DestinationProbe probe, WorkerState state, Clock clock,
             Duration probeInterval, int attempts, Consumer<Alert> alert) {
+        this(committer, probe, state, clock, probeInterval, attempts, alert, null);
+    }
+
+    public CommitRetry(CycleCommitter<K, RES> committer, DestinationProbe probe, WorkerState state, Clock clock,
+            Duration probeInterval, int attempts, Consumer<Alert> alert, WorkerMetrics metrics) {
+        this.metrics = metrics;
         this.committer = committer;
         this.probe = probe;
         this.state = state;
@@ -49,6 +57,7 @@ public final class CommitRetry<K, RES> {
     public synchronized Optional<CommitResult> commit(List<HandlerResult<K, RES>> results) {
         for (int i = 0; i < attempts; i++) {
             try {
+                commitAttempted();
                 CommitResult out = committer.commit(results);
                 state.commitSucceeded();
                 return Optional.of(out);
@@ -61,6 +70,17 @@ public final class CommitRetry<K, RES> {
         }
         hold(results, null);
         return Optional.empty();
+    }
+
+    /** The results held awaiting the destination, or null. */
+    public synchronized List<HandlerResult<K, RES>> heldResults() {
+        return held;
+    }
+
+    private void commitAttempted() {
+        if (metrics != null) {
+            metrics.commitAttempt();
+        }
     }
 
     /** True while results are held awaiting the destination. */
@@ -80,6 +100,7 @@ public final class CommitRetry<K, RES> {
         lastProbe = now;
         try {
             probe.probe();
+            commitAttempted();
             CommitResult out = committer.commit(held);
             state.resume(heldReason);
             state.commitSucceeded();

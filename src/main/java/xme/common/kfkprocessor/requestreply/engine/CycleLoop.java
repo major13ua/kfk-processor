@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import xme.common.kfkprocessor.requestreply.api.ErrorCategory;
 import xme.common.kfkprocessor.requestreply.api.ErrorReply;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult;
 import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
@@ -34,6 +35,7 @@ public final class CycleLoop<K, REQ, RES> {
     private final Duration maxPlausibleLag;
     private volatile boolean running;
     private Thread thread;
+    private Thread watchdog;
 
     public CycleLoop(Intake intake, HandlerExecutor<K, REQ, RES> executor, CommitRetry<K, RES> retry,
             WorkerState state, WorkerMetrics metrics, Clock clock, Duration cycleDeadline,
@@ -83,6 +85,9 @@ public final class CycleLoop<K, REQ, RES> {
         for (HandlerResult<K, RES> r : results) {
             if (r.errorReply() != null) {
                 metrics.errorReply(r.errorReply().category());
+                if (r.errorReply().category() == ErrorCategory.TIMEOUT) {
+                    metrics.handlerTimeout();
+                }
             }
         }
         Optional<CommitResult> committed = retry.commit(results);
@@ -101,9 +106,11 @@ public final class CycleLoop<K, REQ, RES> {
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "Keep-alive poll failed: " + e.getClass().getName());
         }
+        List<HandlerResult<K, RES>> held = retry.heldResults();
         Optional<CommitResult> out = retry.tick();
         if (out.isPresent()) {
             state.setPendingWork(false);
+            recordLag(held, out.get());
             return Iteration.COMMITTED;
         }
         return Iteration.PAUSED;
@@ -136,6 +143,22 @@ public final class CycleLoop<K, REQ, RES> {
         thread = new Thread(this::loop, "request-reply-cycle-loop");
         thread.setDaemon(true);
         thread.start();
+        watchdog = new Thread(this::watch, "request-reply-stall-watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
+    }
+
+    /** Re-evaluates the stall state on the clock, so a stuck or blocked worker is flagged without a state change. */
+    private void watch() {
+        long intervalMillis = Math.max(10, Math.min(1_000, state.stallThreshold().toMillis() / 4));
+        while (running) {
+            state.evaluate();
+            try {
+                Thread.sleep(intervalMillis);
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
     }
 
     public void stop() {
@@ -144,6 +167,10 @@ public final class CycleLoop<K, REQ, RES> {
             running = false;
             t = thread;
             thread = null;
+            if (watchdog != null) {
+                watchdog.interrupt();
+                watchdog = null;
+            }
         }
         if (t != null) {
             t.interrupt();

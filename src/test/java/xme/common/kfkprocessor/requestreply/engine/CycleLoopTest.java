@@ -96,14 +96,17 @@ class CycleLoopTest {
         final List<Object[]> lags = new ArrayList<>();
         final List<ErrorCategory> errorReplies = new ArrayList<>();
         final List<Duration> cycleDurations = new ArrayList<>();
+        final List<State> states = new java.util.concurrent.CopyOnWriteArrayList<>();
+        final java.util.concurrent.atomic.AtomicInteger handlerTimeouts = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicInteger commitAttempts = new java.util.concurrent.atomic.AtomicInteger();
         @Override public void accepted(String lane, long count) { accepted.merge(lane, count, Long::sum); }
         @Override public void consistencyLag(String lane, Duration lag, boolean implausible) {
             lags.add(new Object[] {lane, lag, implausible});
         }
-        @Override public void state(State state) { }
+        @Override public void state(State state) { states.add(state); }
         @Override public void errorReply(ErrorCategory category) { errorReplies.add(category); }
-        @Override public void handlerTimeout() { }
-        @Override public void commitAttempt() { }
+        @Override public void handlerTimeout() { handlerTimeouts.incrementAndGet(); }
+        @Override public void commitAttempt() { commitAttempts.incrementAndGet(); }
         @Override public void cycleDuration(Duration duration) { cycleDurations.add(duration); }
         @Override public void groupMembershipChange() { }
     }
@@ -134,7 +137,7 @@ class CycleLoopTest {
         CycleCommitter<String, String> committer = new CycleCommitter<>(sink,
                 r -> ("reply|" + r.correlationId() + "|" + r.data()).getBytes(StandardCharsets.UTF_8),
                 e -> ("error|" + e.category()).getBytes(StandardCharsets.UTF_8));
-        retry = new CommitRetry<>(committer, probe, state, clock, PROBE, 2, a -> { });
+        retry = new CommitRetry<>(committer, probe, state, clock, PROBE, 2, a -> { }, metrics);
     }
 
     private CycleLoop<String, String, String> loop(Duration cycleDeadline) {
@@ -354,5 +357,76 @@ class CycleLoopTest {
         assertEquals(2L, metrics.accepted.get("high"));
         assertEquals(1L, metrics.accepted.get("low"));
         assertEquals(List.of(ErrorCategory.FAILURE), metrics.errorReplies);
+    }
+
+    // AC-17 (A5): a stuck worker is shown STALLED without any state change driving the evaluation
+    @Test
+    void stuckHandlerIsPublishedAsStalledWithoutAnyStateChange() throws Exception {
+        java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        handler = (ctx, req) -> {
+            entered.countDown();
+            release.await();
+            return "r";
+        };
+        lanes.waiting.add(reqText("high", "stuck"));
+        CycleLoop<String, String, String> loop = loop(Duration.ofSeconds(30));
+        try {
+            loop.start();
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            clock.advance(Duration.ofSeconds(61));
+            long until = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+            while (!metrics.states.contains(WorkerMetrics.State.STALLED) && System.nanoTime() < until) {
+                Thread.sleep(10);
+            }
+            assertTrue(metrics.states.contains(WorkerMetrics.State.STALLED), "published states: " + metrics.states);
+        } finally {
+            release.countDown();
+            loop.stop();
+        }
+    }
+
+    // AC-16 (B12): a Cycle committed after a hold still records Consistency Lag
+    @Test
+    void lagIsRecordedForACycleCommittedAfterAHold() {
+        IncomingRequest q = reqText("high", "x");
+        createdAt.put(q.correlationId(), clock.instant().minusSeconds(5));
+        lanes.waiting.add(q);
+        sink.failWith = new ReplyDestinationFault.Unavailable("down", null);
+        CycleLoop<String, String, String> loop = loop(Duration.ofSeconds(5));
+        assertEquals(CycleLoop.Iteration.HELD, loop.runOnce());
+        sink.failWith = null;
+        clock.advance(PROBE.plusSeconds(1));
+
+        assertEquals(CycleLoop.Iteration.COMMITTED, loop.runOnce());
+
+        assertEquals(1, metrics.lags.size(), "lag recorded once for the committed-after-hold reply");
+    }
+
+    // AC-07 (B12)
+    @Test
+    void handlerTimeoutMetricIsEmittedForTimedOutRequests() {
+        handler = (ctx, req) -> {
+            Thread.sleep(10_000);
+            return "late";
+        };
+        lanes.waiting.add(reqText("high", "slow"));
+
+        loop(Duration.ofMillis(200)).runOnce();
+
+        assertEquals(1, metrics.handlerTimeouts.get());
+    }
+
+    // AC-07 (B12)
+    @Test
+    void commitAttemptMetricIsEmittedPerAttempt() {
+        lanes.waiting.add(reqText("high", "ok"));
+        loop(Duration.ofSeconds(5)).runOnce();
+        assertEquals(1, metrics.commitAttempts.get());
+
+        lanes.waiting.add(reqText("high", "x"));
+        sink.failWith = new IllegalStateException("flaky");
+        loop(Duration.ofSeconds(5)).runOnce();
+        assertEquals(1 + 2, metrics.commitAttempts.get(), "two attempts for the failing Cycle");
     }
 }
