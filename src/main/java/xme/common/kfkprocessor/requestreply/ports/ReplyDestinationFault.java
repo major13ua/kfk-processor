@@ -20,4 +20,15 @@ public abstract class ReplyDestinationFault extends RuntimeException {
             super(message, cause);
         }
     }
+
+    /**
+     * Fault id {@code request_reply.reply_destination.fenced}: a newer instance owns the transactional id. The
+     * producer is never re-created (that would fence the live instance in turn), so the worker stays paused
+     * until it is stopped.
+     */
+    public static final class Fenced extends ReplyDestinationFault {
+        public Fenced(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
 }

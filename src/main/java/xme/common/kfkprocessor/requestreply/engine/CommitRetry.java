@@ -23,6 +23,7 @@ public final class CommitRetry<K, RES> {
 
     private static final String UNAVAILABLE = "request_reply.reply_destination.unavailable";
     private static final String PERMISSION_DENIED = "request_reply.reply_destination.permission_denied";
+    private static final String FENCED = "request_reply.reply_destination.fenced";
 
     private final CycleCommitter<K, RES> committer;
     private final DestinationProbe probe;
@@ -145,7 +146,14 @@ public final class CommitRetry<K, RES> {
         WorkerState.PauseReason reason = fault == null ? WorkerState.PauseReason.DESTINATION : reasonOf(fault);
         heldReason = reason;
         state.pause(reason);
-        alert.accept(new Alert(reason, reason == WorkerState.PauseReason.PERMISSION ? PERMISSION_DENIED : UNAVAILABLE));
+        alert.accept(new Alert(reason, faultId(fault)));
+    }
+
+    private static String faultId(ReplyDestinationFault fault) {
+        if (fault instanceof ReplyDestinationFault.PermissionDenied) {
+            return PERMISSION_DENIED;
+        }
+        return fault instanceof ReplyDestinationFault.Fenced ? FENCED : UNAVAILABLE;
     }
 
     private void moveReason(WorkerState.PauseReason next) {

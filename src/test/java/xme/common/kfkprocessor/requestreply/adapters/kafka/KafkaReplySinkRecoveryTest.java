@@ -17,7 +17,9 @@ import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.errors.InvalidProducerEpochException;
 import org.apache.kafka.common.errors.ProducerFencedException;
+import org.apache.kafka.common.errors.TransactionAbortableException;
 import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
@@ -44,6 +46,10 @@ class KafkaReplySinkRecoveryTest {
         boolean commitAppliedButUnknown;
         int initCalls;
         int commitCalls;
+        /** Failures thrown by the next commitTransaction calls, in order, before anything is applied. */
+        final java.util.ArrayList<RuntimeException> commitFailures = new java.util.ArrayList<>();
+        /** Like a real producer after InvalidProducerEpoch: unusable (cannot abort) until re-initialised. */
+        boolean broken;
 
         Txn() {
             super(true, null, new ByteArraySerializer(), new ByteArraySerializer());
@@ -53,12 +59,18 @@ class KafkaReplySinkRecoveryTest {
         public synchronized void initTransactions() {
             if (initCalls++ == 0) {
                 super.initTransactions();
+            } else if (transactionInFlight()) {
+                super.abortTransaction(); // a new instance's init aborts the old open transaction on the broker
             }
+            broken = false;
             commitAppliedButUnknown = false; // a new instance's init completes the old commit on the broker
         }
 
         @Override
         public synchronized Future<RecordMetadata> send(ProducerRecord<byte[], byte[]> record, Callback callback) {
+            if (broken) {
+                throw new KafkaException("producer is in a fatal state");
+            }
             if (poisoned) {
                 throw new KafkaException("Cannot perform send because at least one previous transactional or "
                         + "idempotent request has failed with errors.");
@@ -79,6 +91,9 @@ class KafkaReplySinkRecoveryTest {
             if (commitAppliedButUnknown) {
                 throw new IllegalStateException("A commit is still in progress; call commitTransaction again");
             }
+            if (broken) {
+                throw new KafkaException("producer is in a fatal state");
+            }
             super.beginTransaction();
         }
 
@@ -89,8 +104,16 @@ class KafkaReplySinkRecoveryTest {
                 commitAppliedButUnknown = false; // the retry completes the commit that already happened
                 return;
             }
-            if (poisoned) {
+            if (poisoned || broken) {
                 throw new KafkaException("Cannot commit a transaction in an error state");
+            }
+            if (!commitFailures.isEmpty()) {
+                RuntimeException f = commitFailures.remove(0);
+                // as the real client: an abortable error needs abortTransaction, a fatal one a new producer
+                poisoned = f instanceof TransactionAbortableException;
+                broken = f instanceof InvalidProducerEpochException
+                        || f instanceof org.apache.kafka.common.errors.InvalidTxnStateException;
+                throw f;
             }
             if (fenceOnCommit) {
                 throw new ProducerFencedException("fenced by a newer instance");
@@ -107,6 +130,9 @@ class KafkaReplySinkRecoveryTest {
         public synchronized void abortTransaction() {
             if (fenceOnCommit) {
                 throw new ProducerFencedException("fenced by a newer instance");
+            }
+            if (broken) {
+                throw new KafkaException("Cannot abort in a fatal state");
             }
             if (commitAppliedButUnknown) {
                 throw new IllegalStateException("Cannot abort while a commit is in progress");
@@ -225,5 +251,169 @@ class KafkaReplySinkRecoveryTest {
         assertThrows(RuntimeException.class, () -> sink.commit(cycle));
 
         assertEquals(1, p.initCalls, "initTransactions again would take the id back from the live instance");
+    }
+
+    // ---- review r2 A2 (task F13) ----
+
+    /** Calls commit for the same Cycle until it returns; fails the test when it never does within {@code calls}. */
+    private static CommitResult commitWithin(KafkaReplySink sink, List<ReplyRecord> cycle, int calls) {
+        RuntimeException last = null;
+        for (int i = 0; i < calls; i++) {
+            try {
+                return sink.commit(cycle);
+            } catch (RuntimeException e) {
+                last = e;
+            }
+        }
+        throw new AssertionError("the sink never recovered in " + calls + " calls; last failure: " + last, last);
+    }
+
+    private static final class FakeClock extends java.time.Clock {
+        java.time.Instant now = java.time.Instant.parse("2026-01-01T00:00:00Z");
+        @Override public java.time.Instant instant() { return now; }
+        @Override public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+        @Override public java.time.Clock withZone(java.time.ZoneId z) { return this; }
+    }
+
+    private static final class Engine {
+        final FakeClock clock = new FakeClock();
+        final java.util.List<xme.common.kfkprocessor.requestreply.engine.CommitRetry.Alert> alerts = new java.util.ArrayList<>();
+        final xme.common.kfkprocessor.requestreply.engine.WorkerState state =
+                new xme.common.kfkprocessor.requestreply.engine.WorkerState(clock, java.time.Duration.ofSeconds(60),
+                        (xme.common.kfkprocessor.requestreply.ports.WorkerMetrics) java.lang.reflect.Proxy.newProxyInstance(
+                                xme.common.kfkprocessor.requestreply.ports.WorkerMetrics.class.getClassLoader(),
+                                new Class<?>[] {xme.common.kfkprocessor.requestreply.ports.WorkerMetrics.class},
+                                (proxy, m, a) -> null));
+        final xme.common.kfkprocessor.requestreply.engine.CommitRetry<String, String> retry;
+
+        Engine(KafkaReplySink sink) {
+            var committer = new xme.common.kfkprocessor.requestreply.engine.CycleCommitter<String, String>(sink,
+                    r -> b("reply|" + r.correlationId()), e -> b("error|" + e.correlationId()));
+            retry = new xme.common.kfkprocessor.requestreply.engine.CommitRetry<>(committer, () -> { }, state, clock,
+                    java.time.Duration.ofSeconds(1), 1, alerts::add);
+        }
+
+        java.util.List<xme.common.kfkprocessor.requestreply.engine.HandlerResult<String, String>> cycle() {
+            var q = new xme.common.kfkprocessor.requestreply.ports.IncomingRequest("high", 0, 7, "key-c1", "c1",
+                    Map.of(), b("p"));
+            return List.of(new xme.common.kfkprocessor.requestreply.engine.HandlerResult<>(q,
+                    new xme.common.kfkprocessor.requestreply.api.Reply<>("c1", "key-c1", "r1"), null));
+        }
+
+        /** Commit, then probe-driven re-commits (one tick per probe interval) while held; returns the tick count. */
+        int driveUntilResumed(int maxTicks) {
+            retry.commit(cycle());
+            int ticks = 0;
+            while (retry.holding() && ticks < maxTicks) {
+                clock.now = clock.now.plusSeconds(2);
+                retry.tick();
+                ticks++;
+            }
+            return ticks;
+        }
+    }
+
+    // A2(a) / AC-08b: the commit times out (unknown), the retried commit then fails definitively. The sink must
+    // clear its pending state, abort or discard, and send the Cycle again in a fresh transaction.
+    @Test
+    void retriedCommitFailingDefinitivelyIsResentInAFreshTransaction() {
+        var p = new Txn();
+        p.commitFailures.add(new TimeoutException("commit outcome unknown"));
+        p.commitFailures.add(new TransactionAbortableException("transaction must be aborted"));
+        var sink = sink(p);
+        List<ReplyRecord> cycle = List.of(reply(1, "c-1", b("a"), false, null));
+
+        CommitResult result = commitWithin(sink, cycle, 3);
+
+        assertTrue(result.failures().isEmpty());
+        assertEquals(List.of("c-1"), p.history().stream().map(KafkaReplySinkRecoveryTest::corr).toList(),
+                "the reply is committed exactly once");
+    }
+
+    // A2(a): through the engine: after the definitive failure of the retried commit the worker must not stay paused.
+    @Test
+    void workerResumesAfterTheRetriedCommitFailedDefinitively() {
+        var p = new Txn();
+        p.commitFailures.add(new TimeoutException("commit outcome unknown"));
+        p.commitFailures.add(new TransactionAbortableException("transaction must be aborted"));
+        var engine = new Engine(sink(p));
+
+        int ticks = engine.driveUntilResumed(4);
+
+        assertFalse(engine.retry.holding(), "still holding after " + ticks + " probe ticks: the sink is stuck");
+        assertEquals(1, p.history().size(), "one committed reply");
+    }
+
+    // A2(a): INVALID_TXN_STATE-style failure of the retried commit is also not permanent.
+    @Test
+    void workerResumesAfterTheRetriedCommitFailedWithInvalidTxnState() {
+        var p = new Txn();
+        p.commitFailures.add(new TimeoutException("commit outcome unknown"));
+        p.commitFailures.add(new org.apache.kafka.common.errors.InvalidTxnStateException("invalid txn state"));
+        var engine = new Engine(sink(p));
+
+        int ticks = engine.driveUntilResumed(4);
+
+        assertFalse(engine.retry.holding(), "still holding after " + ticks + " probe ticks: the sink is stuck");
+        assertEquals(1, p.history().size(), "one committed reply");
+    }
+
+    // A2(b): InvalidProducerEpoch is the broker aborting a timed-out transaction: abortable, not a fence.
+    @Test
+    void invalidProducerEpochOnCommitIsAbortableAndTheCycleIsResent() {
+        var p = new Txn();
+        p.commitFailures.add(new InvalidProducerEpochException("transaction timed out and was aborted"));
+        var sink = sink(p);
+        List<ReplyRecord> cycle = List.of(reply(1, "c-1", b("a"), false, null));
+
+        CommitResult result = commitWithin(sink, cycle, 2);
+
+        assertTrue(result.failures().isEmpty());
+        assertEquals(1, p.history().size(), "one committed reply");
+        assertTrue(p.initCalls >= 2, "the broken producer was re-initialised");
+    }
+
+    // A2(b): same, after an unknown-outcome commit whose retry reports the epoch failure.
+    @Test
+    void workerResumesAfterTheRetriedCommitFailedWithInvalidProducerEpoch() {
+        var p = new Txn();
+        p.commitFailures.add(new TimeoutException("commit outcome unknown"));
+        p.commitFailures.add(new InvalidProducerEpochException("transaction timed out and was aborted"));
+        var engine = new Engine(sink(p));
+
+        int ticks = engine.driveUntilResumed(4);
+
+        assertFalse(engine.retry.holding(), "still holding after " + ticks + " probe ticks: the sink is stuck");
+        assertEquals(1, p.history().size(), "one committed reply");
+    }
+
+    // A2(b): a real fence (ProducerFencedException) is its own alert, distinct from destination unavailable and
+    // from permission denied, and is never mistaken for an epoch abort.
+    @Test
+    void realFenceRaisesItsOwnAlert() {
+        var p = new Txn();
+        p.fenceOnCommit = true;
+        var engine = new Engine(sink(p));
+
+        engine.retry.commit(engine.cycle());
+
+        assertFalse(engine.alerts.isEmpty(), "an alert is raised");
+        String id = engine.alerts.get(0).faultId();
+        assertTrue(id.contains("fenced"), "fence alert id names the fence, got: " + id);
+        assertFalse(id.endsWith("reply_destination.unavailable"), "not the generic destination alert: " + id);
+    }
+
+    // A2(b): an epoch abort must not raise the fence alert.
+    @Test
+    void invalidProducerEpochDoesNotRaiseTheFenceAlert() {
+        var p = new Txn();
+        p.commitFailures.add(new InvalidProducerEpochException("transaction timed out and was aborted"));
+        var engine = new Engine(sink(p));
+
+        engine.driveUntilResumed(4);
+
+        assertTrue(engine.alerts.stream().noneMatch(a -> a.faultId().contains("fenced")),
+                "no fence alert for an epoch abort: " + engine.alerts);
+        assertFalse(engine.retry.holding(), "resumed");
     }
 }

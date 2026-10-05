@@ -101,7 +101,7 @@ Startup validation (flow 4) fails with a plain-language message naming the confl
 | `request_reply.config.lane_source_duplicate` | two lanes reading the same source |
 | `request_reply.config.handler_types_unsupported` | Handler `K`, `REQ` or `RES` resolves to a type other than `String` |
 
-Runtime faults (no exception to the Handler; state and metrics instead): `request_reply.reply_destination.permission_denied` (AC-09: no WRITE on the reply destination, no READ on a lane at the start probe, or no permission on the transactional id), `request_reply.request_lane.permission_denied` (AC-09: a later poll is denied READ on a lane or the group; the worker pauses, alerts once and retries every `probe-interval`), `request_reply.reply_destination.unavailable` (AC-08b), `request_reply.rate_budget_store.unavailable` (AC-18).
+Runtime faults (no exception to the Handler; state and metrics instead): `request_reply.reply_destination.permission_denied` (AC-09: no WRITE on the reply destination, no READ on a lane at the start probe, or no permission on the transactional id), `request_reply.request_lane.permission_denied` (AC-09: a later poll is denied READ on a lane or the group; the worker pauses, alerts once and retries every `probe-interval`), `request_reply.reply_destination.unavailable` (AC-08b), `request_reply.reply_destination.fenced` (AC-05: the producer is fenced, by a newer instance with the transactional id or by the broker aborting a commit held past the commit window; the producer is never re-created, nothing is re-sent, the worker stays paused (destination) until restarted), `request_reply.rate_budget_store.unavailable` (AC-18).
 
 ## 4. Extension ports (SPI, pluggable adapters)
 

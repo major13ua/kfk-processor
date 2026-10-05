@@ -163,8 +163,9 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
                         + " not re-created, so the live instance keeps it");
             }
             p = producer();
-            if (pendingCycle != null) {
-                p.commitTransaction(); // resolves the commit that timed out; throws again while still unknown
+            if (pendingCycle != null && !resolvePending(p)) {
+                p = producer(); // the commit failed for good: nothing was committed, send the Cycle again
+            } else if (pendingCycle != null) {
                 CommitResult done = pendingResult;
                 List<String> cycle = cycleId(replies);
                 // the same Cycle, or what is left of it after results of revoked partitions were dropped while held
@@ -187,6 +188,35 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         }
     }
 
+    /**
+     * Calls {@code commitTransaction} again for the Cycle whose commit timed out. True when it went through. A
+     * failure that leaves the outcome unknown (timeout, retriable, interrupt) or a fence is thrown with the Cycle
+     * still pending; any other failure is definitive (the transaction was not committed, e.g. TRANSACTION_ABORTABLE,
+     * INVALID_TXN_STATE, an epoch bumped by the transaction timeout): the pending state is cleared, the transaction
+     * aborted or the producer discarded, and false returned.
+     */
+    private boolean resolvePending(Producer<byte[], byte[]> p) {
+        try {
+            p.commitTransaction();
+            return true;
+        } catch (RuntimeException e) {
+            if (outcomeUnknown(e) || isFenced(e)) {
+                throw e;
+            }
+            pendingCycle = null;
+            pendingResult = null;
+            open = true; // the failed transaction is still open on the client
+            abort(p);
+            return false;
+        }
+    }
+
+    private static boolean outcomeUnknown(RuntimeException e) {
+        return e instanceof org.apache.kafka.common.errors.TimeoutException
+                || e instanceof org.apache.kafka.common.errors.RetriableException
+                || e instanceof org.apache.kafka.common.errors.InterruptException;
+    }
+
     private void recover(Producer<byte[], byte[]> p, RuntimeException e) {
         if (isFenced(e)) {
             fenced = true;
@@ -196,9 +226,14 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         }
     }
 
+    /**
+     * A real fence: a newer instance took the transactional id. {@link InvalidProducerEpochException} is not one:
+     * the broker bumped the epoch when it aborted a transaction that outlived the transaction timeout, so the
+     * transaction is aborted (or the producer re-created) and the Cycle sent again.
+     */
     private static boolean isFenced(Throwable e) {
         for (Throwable t = e; t != null; t = t.getCause()) {
-            if (t instanceof ProducerFencedException || t instanceof InvalidProducerEpochException) {
+            if (t instanceof ProducerFencedException) {
                 return true;
             }
         }
@@ -405,12 +440,10 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
 
     /** Destination faults become typed faults; everything else (fenced, commit failure) propagates untyped. */
     private RuntimeException translate(RuntimeException e) {
-        if (e instanceof AuthorizationException) {
-            return destinationFault(e);
+        if (isFenced(e)) {
+            return new ReplyDestinationFault.Fenced("fenced by a newer instance with the same transactional id", e);
         }
-        if (e instanceof org.apache.kafka.common.errors.TimeoutException
-                || e instanceof org.apache.kafka.common.errors.RetriableException
-                || e instanceof org.apache.kafka.common.errors.InterruptException) {
+        if (e instanceof AuthorizationException || outcomeUnknown(e)) {
             return destinationFault(e);
         }
         return e;
