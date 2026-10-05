@@ -13,6 +13,7 @@ import java.util.Properties;
 import java.util.Set;
 import org.apache.kafka.clients.consumer.CloseOptions;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -31,8 +32,8 @@ import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
  */
 public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
 
-    static final String CORRELATION_ID = "correlation_id";
-    static final String REQUEST_KEY = "request_key";
+    static final String CORRELATION_ID = IncomingRequest.CORRELATION_ID;
+    static final String REQUEST_KEY = IncomingRequest.REQUEST_KEY;
     /** Synthetic header (epoch millis of the Kafka record), the consistency-lag fallback when created_at is absent. */
     public static final String RECORD_TIMESTAMP = "record_timestamp";
     private static final Duration POLL_TIMEOUT = Duration.ofMillis(100);
@@ -117,6 +118,15 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
             }
         }
         return kept;
+    }
+
+    /**
+     * The consumer's current group metadata (member id, generation, static instance id). The reply sink hands it to
+     * the broker with the offsets, so a worker that lost its partitions in a rebalance is fenced by the group.
+     * Call it only from the thread that polls (the consumer is not thread-safe).
+     */
+    public ConsumerGroupMetadata groupMetadata() {
+        return consumer.groupMetadata();
     }
 
     @Override

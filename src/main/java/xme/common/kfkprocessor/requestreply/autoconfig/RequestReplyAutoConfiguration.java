@@ -92,8 +92,11 @@ public class RequestReplyAutoConfiguration {
     @Bean
     @DependsOn(CHECK)
     @ConditionalOnMissingBean
-    ReplySink requestReplySink(RequestReplyProperties props, Environment env) {
-        return new KafkaReplySink(props, bootstrapServers(env), props.getGroupId());
+    ReplySink requestReplySink(RequestReplyProperties props, Environment env, RequestLanes lanes) {
+        // offsets travel with the lanes consumer's live group metadata, so the group fences a stale worker
+        java.util.function.Supplier<org.apache.kafka.clients.consumer.ConsumerGroupMetadata> metadata =
+                lanes instanceof KafkaRequestLanes kafkaLanes ? kafkaLanes::groupMetadata : null;
+        return new KafkaReplySink(props, bootstrapServers(env), props.getGroupId(), metadata);
     }
 
     @Bean
@@ -185,15 +188,39 @@ public class RequestReplyAutoConfiguration {
         return Instant.now();
     }
 
-    private static <K> byte[] encodeError(ErrorReply<K> e) {
+    static <K> byte[] encodeError(ErrorReply<K> e) {
         String json = "{\"correlation_id\":\"" + escape(e.correlationId()) + "\",\"request_key\":\""
                 + escape(String.valueOf(e.requestKey())) + "\",\"category\":\""
                 + e.category().name().toLowerCase(java.util.Locale.ROOT) + "\"}";
         return json.getBytes(StandardCharsets.UTF_8);
     }
 
+    /** JSON string escaping: quote, backslash and every control character below U+0020. */
     private static String escape(String s) {
-        return s == null ? "" : s.replace("\\", "\\\\").replace("\"", "\\\"");
+        if (s == null) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> out.append("\\\"");
+                case '\\' -> out.append("\\\\");
+                case '\b' -> out.append("\\b");
+                case '\f' -> out.append("\\f");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                case '\t' -> out.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        out.append(c);
+                    }
+                }
+            }
+        }
+        return out.toString();
     }
 
     private static String bootstrapServers(Environment env) {

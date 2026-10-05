@@ -54,7 +54,7 @@ class MyHandler implements RequestReplyHandler<String, String, String> {
    - record value: the payload for the Handler.
    A request without `correlation_id` or `request_key` (or without a payload) is answered at once with an Error Reply `failure` and uses no Rate Budget allowance. A payload over `max-payload-bytes` (default 1 MiB) is answered the same way.
 4. **Read the reply destination and filter by `correlation_id`.** There is one fixed reply destination. Replies and Error Replies carry `correlation_id` and `request_key` echoed unchanged as record headers; the reply record has no key. Do not rely on order across requests.
-5. **Handle Error Replies.** The body is JSON: `{"correlation_id":"...","request_key":"...","category":"failure|timeout|undeliverable"}`. No message, stack trace or payload.
+5. **Handle Error Replies.** Tell them from replies by the record header `type` (`reply` or `error_reply`). The body of an Error Reply is JSON: `{"correlation_id":"...","request_key":"...","category":"failure|timeout|undeliverable"}`. No message, stack trace or payload.
 
 | Category | Meaning |
 |---|---|

@@ -77,9 +77,43 @@ class KafkaReplySinkTest {
     // AC-05
     @Test
     void transactionalIdIsStablePerIdentityAndDiffersBetweenIdentities() {
-        assertEquals(KafkaReplySink.transactionalId("worker-1"), KafkaReplySink.transactionalId("worker-1"));
-        assertFalse(KafkaReplySink.transactionalId("worker-1").equals(KafkaReplySink.transactionalId("worker-2")));
-        assertTrue(KafkaReplySink.transactionalId("worker-1").contains("worker-1"));
+        assertEquals(KafkaReplySink.transactionalId("grp", "worker-1"), KafkaReplySink.transactionalId("grp", "worker-1"));
+        assertFalse(KafkaReplySink.transactionalId("grp", "worker-1").equals(KafkaReplySink.transactionalId("grp", "worker-2")));
+        assertTrue(KafkaReplySink.transactionalId("grp", "worker-1").contains("worker-1"));
+    }
+
+    // AC-05 (review A2: the same identity in another group must not share, and so fence, a transactional id)
+    @Test
+    void transactionalIdDiffersBetweenGroupsForTheSameIdentity() {
+        assertFalse(KafkaReplySink.transactionalId("grp-a", "worker-1").equals(KafkaReplySink.transactionalId("grp-b", "worker-1")));
+        assertTrue(KafkaReplySink.transactionalId("grp-a", "worker-1").contains("grp-a"));
+        // no two (group, identity) pairs may concatenate to the same id
+        assertFalse(KafkaReplySink.transactionalId("a-b", "c").equals(KafkaReplySink.transactionalId("a", "b-c")));
+    }
+
+    // AC-05 (review A2: offsets go in with the live consumer's generation, so a zombie is fenced by the group)
+    @Test
+    void offsetsAreSentWithTheCurrentGroupMetadataOfTheConsumer() {
+        var captured = new java.util.ArrayList<ConsumerGroupMetadata>();
+        var p = new MockProducer<byte[], byte[]>(true, null, new ByteArraySerializer(), new ByteArraySerializer()) {
+            @Override
+            public synchronized void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets,
+                    ConsumerGroupMetadata metadata) {
+                captured.add(metadata);
+                super.sendOffsetsToTransaction(offsets, metadata);
+            }
+        };
+        var generation = new java.util.concurrent.atomic.AtomicInteger(7);
+        var sink = new KafkaReplySink(p, REPLIES, SOURCES,
+                () -> new ConsumerGroupMetadata("grp", generation.get(), "member-1", java.util.Optional.of("worker-1")));
+
+        sink.commit(List.of(reply("high", 0, 1, "c-1", b("a"))));
+        generation.set(8);
+        sink.commit(List.of(reply("high", 0, 2, "c-2", b("b"))));
+
+        assertEquals(List.of(7, 8), captured.stream().map(ConsumerGroupMetadata::generationId).toList());
+        assertEquals("member-1", captured.get(0).memberId());
+        assertEquals(java.util.Optional.of("worker-1"), captured.get(0).groupInstanceId());
     }
 
     // AC-05 (one commit = one transaction: replies and positions together)

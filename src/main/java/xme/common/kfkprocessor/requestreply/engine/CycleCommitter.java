@@ -1,5 +1,6 @@
 package xme.common.kfkprocessor.requestreply.engine;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
@@ -43,7 +44,8 @@ public final class CycleCommitter<K, RES> {
         if (!result.isSuccess()) {
             ErrorReply<K> e = result.errorReply();
             return new ReplyRecord(q.lane(), q.partition(), q.position(), e.correlationId(), e.requestKey(),
-                    errorReplyEncoder.apply(e), true, null);
+                    errorReplyEncoder.apply(e), true, null, raw(q, IncomingRequest.CORRELATION_ID, e.correlationId()),
+                    raw(q, IncomingRequest.REQUEST_KEY, e.requestKey()));
         }
         Reply<K, RES> reply = result.reply();
         byte[] fallback = errorReplyEncoder.apply(
@@ -55,6 +57,19 @@ public final class CycleCommitter<K, RES> {
             value = null; // the sink reports it as unencodable and sends the fallback
         }
         return new ReplyRecord(q.lane(), q.partition(), q.position(), reply.correlationId(), reply.requestKey(),
-                value, false, fallback);
+                value, false, fallback, raw(q, IncomingRequest.CORRELATION_ID, reply.correlationId()),
+                raw(q, IncomingRequest.REQUEST_KEY, reply.requestKey()));
+    }
+
+    /**
+     * The request's raw identifier bytes when {@code echoed} is what they decode to (echoed unchanged), else null.
+     * Bytes that are not valid UTF-8 do not survive a String, so the raw bytes are what goes back on the wire.
+     */
+    private static byte[] raw(IncomingRequest request, String header, Object echoed) {
+        byte[] bytes = request.headers() == null ? null : request.headers().get(header);
+        if (bytes == null || echoed == null) {
+            return null;
+        }
+        return new String(bytes, StandardCharsets.UTF_8).equals(echoed.toString()) ? bytes : null;
     }
 }

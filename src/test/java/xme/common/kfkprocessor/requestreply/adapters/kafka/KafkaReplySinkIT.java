@@ -43,11 +43,17 @@ class KafkaReplySinkIT {
 
     private record Env(String group, String identity, String requests, String replies) {
         static Env create() throws Exception {
+            return create(null);
+        }
+
+        /** A reply topic whose broker-side limit is {@code maxMessageBytes} (null = broker default). */
+        static Env create(Integer maxMessageBytes) throws Exception {
             String id = UUID.randomUUID().toString().substring(0, 8);
             var env = new Env("grp-" + id, "worker-" + id, "req-" + id, "rep-" + id);
             try (Admin admin = Admin.create(Map.<String, Object>of("bootstrap.servers", kafka.getBootstrapServers()))) {
                 admin.createTopics(List.of(new NewTopic(env.requests, 2, (short) 1),
-                        new NewTopic(env.replies, 1, (short) 1))).all().get();
+                        new NewTopic(env.replies, 1, (short) 1).configs(maxMessageBytes == null ? Map.of()
+                                : Map.of("max.message.bytes", maxMessageBytes.toString())))).all().get();
             }
             return env;
         }
@@ -113,7 +119,7 @@ class KafkaReplySinkIT {
 
     /** A Cycle killed before its commit: reply and positions written into an open transaction, then abandoned. */
     private static KafkaProducer<byte[], byte[]> abandonedCycle(Env env, String corr, long position) {
-        var tx = new KafkaProducer<byte[], byte[]>(producerProps(KafkaReplySink.transactionalId(env.identity)));
+        var tx = new KafkaProducer<byte[], byte[]>(producerProps(KafkaReplySink.transactionalId(env.group, env.identity)));
         tx.initTransactions();
         tx.beginTransaction();
         var r = new ProducerRecord<byte[], byte[]>(env.replies, null, b("dead"));
@@ -234,5 +240,38 @@ class KafkaReplySinkIT {
         assertEquals(List.of("big=undeliverable", "ok-1=a", "ok-2=b"),
                 committedRepliesWithValues(env, Duration.ofSeconds(5)).stream().sorted().toList());
         assertEquals(3L, groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset());
+    }
+
+    // AC-08 (review A1: the broker, not the client, rejects the reply; the failed send poisons the transaction)
+    @Test
+    void replyRejectedByTheBrokerIsReplacedByItsUndeliverableErrorReply() throws Exception {
+        var env = Env.create(2000);
+        CommitResult r;
+        try (var sink = env.sink()) {
+            r = sink.commit(List.of(
+                    env.reply(0, 0, "ok-1", b("a")),
+                    new ReplyRecord("high", 0, 1, "big", "key-big", new byte[100 * 1024], false, b("undeliverable")),
+                    env.reply(0, 2, "ok-2", b("b"))));
+        }
+        assertEquals(1, r.failures().size());
+        assertTrue(r.failures().get(0).substituted());
+        assertEquals(List.of("big=undeliverable", "ok-1=a", "ok-2=b"),
+                committedRepliesWithValues(env, Duration.ofSeconds(5)).stream().sorted().toList());
+        assertEquals(3L, groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset());
+    }
+
+    // AC-08 (review A1: an Error Reply the broker rejects is reported, the Cycle and its positions still commit)
+    @Test
+    void errorReplyRejectedByTheBrokerIsReportedAndTheCycleCommits() throws Exception {
+        var env = Env.create(2000);
+        CommitResult r;
+        try (var sink = env.sink()) {
+            r = sink.commit(List.of(
+                    env.reply(0, 0, "ok-1", b("a")),
+                    new ReplyRecord("high", 0, 1, "err", "key-err", new byte[100 * 1024], true, null)));
+        }
+        assertEquals(1, r.failures().size());
+        assertEquals(List.of("ok-1=a"), committedRepliesWithValues(env, Duration.ofSeconds(5)));
+        assertEquals(2L, groupOffsets(env).get(new TopicPartition(env.requests, 0)).offset());
     }
 }
