@@ -81,7 +81,7 @@ An Error Reply carries category, correlation id and Request Key only. No excepti
 | `draw-per-round` | int | 100 | allowance units drawn per intake round | ADR-0003 |
 | `probe-interval` | duration | 5s | interval of reply-destination and allowance-store probes while paused | AC-08b, AC-09, AC-18 |
 
-Kafka brokers come from `spring.kafka.bootstrap-servers`. Beans `RequestLanes`, `ReplySink`, `AllowanceStore` and `DestinationProbe` replace the defaults; a `Consumer<CommitRetry.Alert>` bean named `requestReplyAlertListener` replaces the default error log of configuration faults.
+Kafka brokers and security settings (`spring.kafka.bootstrap-servers`, `spring.kafka.security.*`, `spring.kafka.ssl.*`, `spring.kafka.properties.*`) are applied to the consumer, producer and probe client alike. Beans `RequestLanes`, `ReplySink`, `AllowanceStore` and `DestinationProbe` replace the defaults; a `Consumer<CommitRetry.Alert>` bean named `requestReplyAlertListener` replaces the default error log of configuration faults.
 
 Startup validation (flow 4) fails with a plain-language message naming the conflicting values. Error codes, neutral `module.error_name`:
 
@@ -101,7 +101,7 @@ Startup validation (flow 4) fails with a plain-language message naming the confl
 | `request_reply.config.lane_source_duplicate` | two lanes reading the same source |
 | `request_reply.config.handler_types_unsupported` | Handler `K`, `REQ` or `RES` resolves to a type other than `String` |
 
-Runtime faults (no exception to the Handler; state and metrics instead): `request_reply.reply_destination.permission_denied` (AC-09), `request_reply.reply_destination.unavailable` (AC-08b), `request_reply.rate_budget_store.unavailable` (AC-18).
+Runtime faults (no exception to the Handler; state and metrics instead): `request_reply.reply_destination.permission_denied` (AC-09: no WRITE on the reply destination, no READ on a lane at the start probe, or no permission on the transactional id), `request_reply.request_lane.permission_denied` (AC-09: a later poll is denied READ on a lane or the group; the worker pauses, alerts once and retries every `probe-interval`), `request_reply.reply_destination.unavailable` (AC-08b), `request_reply.rate_budget_store.unavailable` (AC-18).
 
 ## 4. Extension ports (SPI, pluggable adapters)
 

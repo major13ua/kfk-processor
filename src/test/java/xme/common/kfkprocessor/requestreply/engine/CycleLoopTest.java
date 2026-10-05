@@ -63,7 +63,19 @@ class CycleLoopTest {
         final List<IncomingRequest> waiting = new ArrayList<>();
         int fetches;
         int keepAlives;
-        @Override public void keepAlive() { keepAlives++; }
+        RuntimeException denied;
+        @Override public void keepAlive() {
+            keepAlives++;
+            if (denied != null) {
+                throw denied;
+            }
+        }
+        @Override public boolean awaitAvailable() {
+            if (denied != null) {
+                throw denied;
+            }
+            return true;
+        }
         @Override public List<IncomingRequest> fetch(Map<String, Integer> quotaByLane) {
             fetches++;
             List<IncomingRequest> out = new ArrayList<>(waiting);
@@ -152,6 +164,48 @@ class CycleLoopTest {
                 Duration.ofSeconds(30));
         return new CycleLoop<>(intake, executor, retry, state, metrics, clock, cycleDeadline,
                 r -> createdAt.getOrDefault(r.correlationId(), clock.instant()), MAX_LAG);
+    }
+
+    private CycleLoop<String, String, String> loopWithAlerts() {
+        Map<String, Double> weights = new LinkedHashMap<>();
+        weights.put("high", 3.0);
+        weights.put("low", 1.0);
+        Intake intake = new Intake(store, lanes, state, clock, weights, 0.05, MAX_BYTES, 10, PROBE);
+        HandlerExecutor<String, String, String> executor = new HandlerExecutor<>(
+                (ctx, req) -> handler.handle(ctx, req),
+                r -> new String(r.payload(), StandardCharsets.UTF_8),
+                Duration.ofSeconds(30));
+        return new CycleLoop<>(intake, executor, retry, state, metrics, clock, Duration.ofSeconds(5),
+                r -> clock.instant(), MAX_LAG, PROBE, alerts::add);
+    }
+
+    // AC-09 (review B10): lane-read denial is surfaced (paused + alert), not retried silently
+    @Test
+    void laneReadDenialPausesAlertsOnceAndResumesWhenReadingWorksAgain() {
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+        lanes.denied = new xme.common.kfkprocessor.requestreply.ports.LaneAccessDeniedException("no READ", null);
+
+        assertEquals(CycleLoop.Iteration.PAUSED, loop.runOnce());
+        assertEquals(WorkerState.PauseReason.LANE_PERMISSION, state.pauseReason());
+        assertEquals(1, alerts.size());
+        assertEquals("request_reply.request_lane.permission_denied", alerts.get(0).faultId());
+
+        // inside the probe interval nothing is retried and nobody is alerted again
+        assertEquals(CycleLoop.Iteration.PAUSED, loop.runOnce());
+        assertEquals(1, alerts.size());
+
+        // after the interval a still-denied retry stays paused without a second alert
+        clock.advance(PROBE);
+        assertEquals(CycleLoop.Iteration.PAUSED, loop.runOnce());
+        assertEquals(1, alerts.size());
+
+        // permission restored: next retry resumes by itself and the request is handled
+        lanes.denied = null;
+        lanes.waiting.add(reqText("high", "hello"));
+        clock.advance(PROBE);
+        assertEquals(CycleLoop.Iteration.COMMITTED, loop.runOnce());
+        assertEquals(null, state.pauseReason());
+        assertEquals(1, sink.commits.size());
     }
 
     private IncomingRequest req(String lane, int payloadBytes) {

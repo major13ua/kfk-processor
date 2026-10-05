@@ -298,4 +298,33 @@ class KafkaReplySinkTest {
         assertFalse(result.failures().get(0).substituted());
         assertEquals(0, p.history().size());
     }
+
+    // AC-09 (review B10): a missing WRITE on the transactional id is a permission fault, not "unavailable"
+    @Test
+    void transactionalIdAuthorizationFailureAtInitIsPermissionDenied() {
+        var p = new Producer();
+        p.initTransactionException = new org.apache.kafka.common.errors.TransactionalIdAuthorizationException("tx");
+        assertThrows(ReplyDestinationFault.PermissionDenied.class,
+                () -> sink(p).commit(List.of(reply("high", 0, 1, "c-1", b("a")))));
+    }
+
+    @Test
+    void transactionalIdAuthorizationFailureAtCommitIsPermissionDenied() {
+        var p = new Producer();
+        p.commitTransactionException = new org.apache.kafka.common.errors.TransactionalIdAuthorizationException("tx");
+        assertThrows(ReplyDestinationFault.PermissionDenied.class,
+                () -> sink(p).commit(List.of(reply("high", 0, 1, "c-1", b("a")))));
+    }
+
+    // AC-09 (review B10): security settings reach the producer
+    @Test
+    void producerGetsTheSharedClientProperties() {
+        var props = new xme.common.kfkprocessor.requestreply.api.RequestReplyProperties();
+        props.setWorkerIdentity("worker-1");
+        var out = KafkaReplySink.producerProperties(props,
+                Map.of("bootstrap.servers", "b:9092", "security.protocol", "SASL_SSL"), "grp");
+        assertEquals("SASL_SSL", out.get("security.protocol"));
+        assertEquals("b:9092", out.get("bootstrap.servers"));
+        assertEquals(KafkaReplySink.transactionalId("grp", "worker-1"), out.get("transactional.id"));
+    }
 }

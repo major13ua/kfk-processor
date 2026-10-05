@@ -8,11 +8,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import xme.common.kfkprocessor.requestreply.api.ErrorCategory;
 import xme.common.kfkprocessor.requestreply.api.ErrorReply;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult;
 import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
+import xme.common.kfkprocessor.requestreply.ports.LaneAccessDeniedException;
 import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
 
 /** Ties intake, Handler execution and commit into Cycles (T13). */
@@ -23,6 +25,7 @@ public final class CycleLoop<K, REQ, RES> {
 
     private static final System.Logger LOG = System.getLogger(CycleLoop.class.getName());
     private static final long IDLE_BACKOFF_MILLIS = 10;
+    private static final String LANE_PERMISSION_DENIED = "request_reply.request_lane.permission_denied";
 
     private final Intake intake;
     private final HandlerExecutor<K, REQ, RES> executor;
@@ -33,6 +36,11 @@ public final class CycleLoop<K, REQ, RES> {
     private final Duration cycleDeadline;
     private final Function<IncomingRequest, Instant> createdAt;
     private final Duration maxPlausibleLag;
+    private final Duration probeInterval;
+    private final Consumer<CommitRetry.Alert> alert;
+    /** Set while the lanes cannot be read; retried every probe interval, alerted once per outage. */
+    private boolean lanesDenied;
+    private Instant lastLaneAttempt;
     private volatile boolean running;
     private Thread thread;
     private Thread watchdog;
@@ -40,6 +48,14 @@ public final class CycleLoop<K, REQ, RES> {
     public CycleLoop(Intake intake, HandlerExecutor<K, REQ, RES> executor, CommitRetry<K, RES> retry,
             WorkerState state, WorkerMetrics metrics, Clock clock, Duration cycleDeadline,
             Function<IncomingRequest, Instant> createdAt, Duration maxPlausibleLag) {
+        this(intake, executor, retry, state, metrics, clock, cycleDeadline, createdAt, maxPlausibleLag,
+                Duration.ofSeconds(5), alert -> { });
+    }
+
+    public CycleLoop(Intake intake, HandlerExecutor<K, REQ, RES> executor, CommitRetry<K, RES> retry,
+            WorkerState state, WorkerMetrics metrics, Clock clock, Duration cycleDeadline,
+            Function<IncomingRequest, Instant> createdAt, Duration maxPlausibleLag, Duration probeInterval,
+            Consumer<CommitRetry.Alert> alert) {
         this.intake = intake;
         this.executor = executor;
         this.retry = retry;
@@ -49,6 +65,8 @@ public final class CycleLoop<K, REQ, RES> {
         this.cycleDeadline = cycleDeadline;
         this.createdAt = createdAt;
         this.maxPlausibleLag = maxPlausibleLag;
+        this.probeInterval = probeInterval;
+        this.alert = alert;
     }
 
     /** One iteration: intake, run, commit; or only {@code retry.tick()} while paused. */
@@ -56,7 +74,19 @@ public final class CycleLoop<K, REQ, RES> {
         if (retry.holding()) {
             return tickPaused();
         }
-        IntakeResult in = intake.intake();
+        if (lanesDenied && Duration.between(lastLaneAttempt, clock.instant()).compareTo(probeInterval) < 0) {
+            return tickLanesDenied();
+        }
+        IntakeResult in;
+        try {
+            in = intake.intake();
+        } catch (LaneAccessDeniedException e) {
+            return onLanesDenied();
+        }
+        if (lanesDenied) {
+            lanesDenied = false;
+            state.resume(WorkerState.PauseReason.LANE_PERMISSION);
+        }
         if (in.paused()) {
             return tickPaused();
         }
@@ -98,6 +128,30 @@ public final class CycleLoop<K, REQ, RES> {
         state.setPendingWork(false);
         recordLag(results, committed.get());
         return Iteration.COMMITTED;
+    }
+
+    private Iteration onLanesDenied() {
+        lastLaneAttempt = clock.instant();
+        if (!lanesDenied) {
+            lanesDenied = true;
+            state.pause(WorkerState.PauseReason.LANE_PERMISSION);
+            alert.accept(new CommitRetry.Alert(WorkerState.PauseReason.LANE_PERMISSION, LANE_PERMISSION_DENIED));
+            LOG.log(System.Logger.Level.ERROR, "Request lanes cannot be read (" + LANE_PERMISSION_DENIED
+                    + "): worker paused, retrying every " + probeInterval);
+        }
+        return Iteration.PAUSED;
+    }
+
+    /** Between retries: keep the group membership alive; the denial it hits again is already reported. */
+    private Iteration tickLanesDenied() {
+        try {
+            intake.keepAlive();
+        } catch (LaneAccessDeniedException ignored) {
+            // still denied, already alerted
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.WARNING, "Keep-alive poll failed: " + e.getClass().getName());
+        }
+        return Iteration.PAUSED;
     }
 
     private Iteration tickPaused() {

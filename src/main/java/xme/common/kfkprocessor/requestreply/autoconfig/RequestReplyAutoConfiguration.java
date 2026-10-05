@@ -19,6 +19,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.core.ResolvableType;
@@ -92,7 +93,7 @@ public class RequestReplyAutoConfiguration {
     @DependsOn(CHECK)
     @ConditionalOnMissingBean
     RequestLanes requestReplyLanes(RequestReplyProperties props, Environment env, WorkerMetrics metrics) {
-        return new KafkaRequestLanes(props, bootstrapServers(env), props.getGroupId(), metrics);
+        return new KafkaRequestLanes(props, clientProperties(env), props.getGroupId(), metrics);
     }
 
     @Bean
@@ -102,7 +103,7 @@ public class RequestReplyAutoConfiguration {
         // offsets travel with the lanes consumer's live group metadata, so the group fences a stale worker
         java.util.function.Supplier<org.apache.kafka.clients.consumer.ConsumerGroupMetadata> metadata =
                 lanes instanceof KafkaRequestLanes kafkaLanes ? kafkaLanes::groupMetadata : null;
-        return new KafkaReplySink(props, bootstrapServers(env), props.getGroupId(), metadata);
+        return new KafkaReplySink(props, clientProperties(env), props.getGroupId(), metadata);
     }
 
     @Bean
@@ -124,7 +125,9 @@ public class RequestReplyAutoConfiguration {
     @DependsOn(CHECK)
     @ConditionalOnMissingBean
     DestinationProbe requestReplyDestinationProbe(RequestReplyProperties props, Environment env) {
-        return new DefaultKafkaDestinationProbe(bootstrapServers(env), props.getReplyDestination());
+        return new DefaultKafkaDestinationProbe(clientProperties(env), props.getReplyDestination(),
+                props.getLanes().stream().map(RequestReplyProperties.Lane::getSource).toList(),
+                KafkaReplySink.transactionalId(props.getGroupId(), props.getWorkerIdentity()));
     }
 
     @Bean
@@ -170,7 +173,7 @@ public class RequestReplyAutoConfiguration {
         CommitRetry<K, RES> retry = new CommitRetry<>(committer, probe, state, clock, props.getProbeInterval(),
                 props.getCommitRetryAttempts(), alert, metrics);
         return new CycleLoop<>(intake, executor, retry, state, metrics, clock, props.effectiveCycleDeadline(),
-                RequestReplyAutoConfiguration::createdAt, MAX_PLAUSIBLE_LAG);
+                RequestReplyAutoConfiguration::createdAt, MAX_PLAUSIBLE_LAG, props.getProbeInterval(), alert);
     }
 
     /** created_at header (ISO-8601), else the record timestamp, else now. */
@@ -229,11 +232,17 @@ public class RequestReplyAutoConfiguration {
         return out.toString();
     }
 
-    private static String bootstrapServers(Environment env) {
-        List<String> servers = Binder.get(env).bind("spring.kafka.bootstrap-servers",
-                org.springframework.boot.context.properties.bind.Bindable.listOf(String.class))
-                .orElse(List.of("localhost:9092"));
-        return String.join(",", servers);
+    /**
+     * Bootstrap servers and security settings ({@code spring.kafka.*}) shared by the consumer, producer and admin
+     * client of the worker, so a secured cluster works for all three. {@code client.id} is left to each client.
+     */
+    static Map<String, Object> clientProperties(Environment env) {
+        KafkaProperties kafka = Binder.get(env).bind("spring.kafka", KafkaProperties.class)
+                .orElseGet(KafkaProperties::new);
+        Map<String, Object> out = new LinkedHashMap<>(kafka.buildAdminProperties());
+        out.remove("client.id");
+        out.values().removeIf(java.util.Objects::isNull);
+        return out;
     }
 
     /** Releases the Redis connection on shutdown. */

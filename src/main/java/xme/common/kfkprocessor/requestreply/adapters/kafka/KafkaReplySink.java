@@ -19,7 +19,6 @@ import org.apache.kafka.common.errors.AuthorizationException;
 import org.apache.kafka.common.errors.InvalidProducerEpochException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.RecordTooLargeException;
-import org.apache.kafka.common.errors.TopicAuthorizationException;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import xme.common.kfkprocessor.requestreply.api.RequestReplyProperties;
@@ -79,7 +78,14 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
      */
     public KafkaReplySink(RequestReplyProperties properties, String bootstrapServers, String groupId,
             Supplier<ConsumerGroupMetadata> groupMetadata) {
-        this(() -> newProducer(properties, bootstrapServers, groupId), properties.getReplyDestination(),
+        this(properties, Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers), groupId, groupMetadata);
+    }
+
+    /** {@code clientProperties}: bootstrap servers and security settings shared by every Kafka client of the worker. */
+    public KafkaReplySink(RequestReplyProperties properties, Map<String, Object> clientProperties, String groupId,
+            Supplier<ConsumerGroupMetadata> groupMetadata) {
+        this(() -> new KafkaProducer<>(producerProperties(properties, clientProperties, groupId)),
+                properties.getReplyDestination(),
                 sources(properties), groupMetadata != null ? groupMetadata : unfenced(groupId));
         this.maxRecordBytes = ProducerConfig.configDef().defaultValues().get(ProducerConfig.MAX_REQUEST_SIZE_CONFIG) instanceof Integer i
                 ? i : Integer.MAX_VALUE;
@@ -121,7 +127,7 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
      * it so the same identity in another group never shares, and so fences, this worker's id. Length-prefixed, so
      * no two (group, identity) pairs give the same id.
      */
-    static String transactionalId(String group, String workerIdentity) {
+    public static String transactionalId(String group, String workerIdentity) {
         return "request-reply-" + group.length() + ":" + group + ":" + workerIdentity;
     }
 
@@ -133,10 +139,10 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         return m;
     }
 
-    private static Producer<byte[], byte[]> newProducer(RequestReplyProperties properties, String bootstrapServers,
+    static Properties producerProperties(RequestReplyProperties properties, Map<String, Object> clientProperties,
             String groupId) {
         Properties p = new Properties();
-        p.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        p.putAll(clientProperties);
         p.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId(groupId, properties.getWorkerIdentity()));
         p.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         p.put(ProducerConfig.ACKS_CONFIG, "all");
@@ -145,7 +151,7 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         p.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, timeoutMs);
         p.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
         p.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
-        return new KafkaProducer<>(p);
+        return p;
     }
 
     @Override
@@ -387,8 +393,7 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
     }
 
     private static ReplyDestinationFault destinationFault(Throwable e) {
-        if (e instanceof AuthorizationException && !(e instanceof org.apache.kafka.common.errors.TransactionalIdAuthorizationException)
-                || e instanceof TopicAuthorizationException) {
+        if (e instanceof AuthorizationException) {
             return new ReplyDestinationFault.PermissionDenied("reply destination denies access", e);
         }
         return new ReplyDestinationFault.Unavailable("reply destination unavailable", e);
@@ -396,7 +401,7 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
 
     /** Destination faults become typed faults; everything else (fenced, commit failure) propagates untyped. */
     private RuntimeException translate(RuntimeException e) {
-        if (e instanceof AuthorizationException && !(e instanceof org.apache.kafka.common.errors.TransactionalIdAuthorizationException)) {
+        if (e instanceof AuthorizationException) {
             return destinationFault(e);
         }
         if (e instanceof org.apache.kafka.common.errors.TimeoutException

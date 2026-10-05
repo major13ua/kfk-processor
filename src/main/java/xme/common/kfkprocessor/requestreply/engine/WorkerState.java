@@ -15,7 +15,7 @@ public final class WorkerState {
 
     public enum Status { RUNNING, IDLE, PAUSED, STALLED }
 
-    public enum PauseReason { LIMITER, DESTINATION, PERMISSION }
+    public enum PauseReason { LIMITER, DESTINATION, PERMISSION, LANE_PERMISSION }
 
     private final Clock clock;
     private final Duration stallThreshold;

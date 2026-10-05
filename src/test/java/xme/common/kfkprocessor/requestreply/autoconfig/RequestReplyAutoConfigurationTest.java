@@ -156,6 +156,20 @@ class RequestReplyAutoConfigurationTest {
         });
     }
 
+    // B10: spring.kafka security settings reach every Kafka client of the worker
+    @Test
+    void kafkaSecuritySettingsAreCollectedForTheWorkersClients() {
+        var env = new org.springframework.mock.env.MockEnvironment()
+                .withProperty("spring.kafka.bootstrap-servers", "b1:9093,b2:9093")
+                .withProperty("spring.kafka.security.protocol", "SASL_SSL")
+                .withProperty("spring.kafka.properties.sasl.mechanism", "PLAIN");
+        Map<String, Object> out = RequestReplyAutoConfiguration.clientProperties(env);
+        assertThat(out.get("security.protocol")).isEqualTo("SASL_SSL");
+        assertThat(out.get("sasl.mechanism")).isEqualTo("PLAIN");
+        assertThat(String.valueOf(out.get("bootstrap.servers"))).contains("b1:9093").contains("b2:9093");
+        assertThat(out).doesNotContainKey("client.id");
+    }
+
     // AC-15 via T3: identity is explicit
     @Test
     void missingWorkerIdentityRefusesStart() {

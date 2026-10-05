@@ -36,7 +36,7 @@
 | F4 | Stall gauge + metrics (A5, B12) | done |
 | F5 | Graceful stop (A6) | done |
 | F6 | Startup validation, handler types, docs (B9, B14, B13) | done |
-| F7 | Probe (B10) | todo |
+| F7 | Probe (B10) | done |
 | F8 | Per-lane key chains (B11) | todo |
 | F9 | Test gaps (Group D) | todo |
 | F10 | Spec drift + stage-2 docs (Group C) | todo |

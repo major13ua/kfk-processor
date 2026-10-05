@@ -12,16 +12,20 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import org.apache.kafka.clients.consumer.CloseOptions;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.AuthorizationException;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import xme.common.kfkprocessor.requestreply.api.RequestReplyProperties;
 import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
+import xme.common.kfkprocessor.requestreply.ports.LaneAccessDeniedException;
 import xme.common.kfkprocessor.requestreply.ports.RequestLanes;
 import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
 
@@ -40,7 +44,7 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
     static final int MAX_POLL_RECORDS = 100;
     private static final Duration POLL_TIMEOUT = Duration.ofMillis(100);
 
-    private final KafkaConsumer<byte[], byte[]> consumer;
+    private final Consumer<byte[], byte[]> consumer;
     private final Map<String, String> laneBySource = new LinkedHashMap<>();
     private final Map<String, String> sourceByLane = new HashMap<>();
     /**
@@ -52,22 +56,22 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
 
     public KafkaRequestLanes(
             RequestReplyProperties properties, String bootstrapServers, String groupId, WorkerMetrics metrics) {
+        this(properties, Map.of(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers), groupId, metrics);
+    }
+
+    /** {@code clientProperties}: bootstrap servers and security settings shared by every Kafka client of the worker. */
+    public KafkaRequestLanes(RequestReplyProperties properties, Map<String, Object> clientProperties,
+            String groupId, WorkerMetrics metrics) {
+        this(new KafkaConsumer<>(consumerProperties(properties, clientProperties, groupId)), properties, metrics);
+    }
+
+    /** Test seam: injected consumer. */
+    KafkaRequestLanes(Consumer<byte[], byte[]> consumer, RequestReplyProperties properties, WorkerMetrics metrics) {
+        this.consumer = consumer;
         for (RequestReplyProperties.Lane lane : properties.getLanes()) {
             laneBySource.put(lane.getSource(), lane.getName());
             sourceByLane.put(lane.getName(), lane.getSource());
         }
-        Properties p = new Properties();
-        p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        p.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-        p.put(ConsumerConfig.GROUP_INSTANCE_ID_CONFIG, properties.getWorkerIdentity());
-        p.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, (int) properties.getIdentityWindow().toMillis());
-        p.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
-        p.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, MAX_POLL_RECORDS);
-        p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
-        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        p.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
-        p.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
-        consumer = new KafkaConsumer<>(p);
         consumer.subscribe(new ArrayList<>(laneBySource.keySet()), new ConsumerRebalanceListener() {
             @Override
             public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
@@ -123,6 +127,22 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         return kept;
     }
 
+    static Properties consumerProperties(RequestReplyProperties properties, Map<String, Object> clientProperties,
+            String groupId) {
+        Properties p = new Properties();
+        p.putAll(clientProperties);
+        p.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        p.put(ConsumerConfig.GROUP_INSTANCE_ID_CONFIG, properties.getWorkerIdentity());
+        p.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, (int) properties.getIdentityWindow().toMillis());
+        p.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+        p.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, MAX_POLL_RECORDS);
+        p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        p.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+        p.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+        return p;
+    }
+
     /**
      * The consumer's current group metadata (member id, generation, static instance id). The reply sink hands it to
      * the broker with the offsets, so a worker that lost its partitions in a rebalance is fenced by the group.
@@ -130,6 +150,15 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
      */
     public ConsumerGroupMetadata groupMetadata() {
         return consumer.groupMetadata();
+    }
+
+    /** Polls; an authorization failure (topic READ or group) is surfaced as {@link LaneAccessDeniedException}. */
+    private ConsumerRecords<byte[], byte[]> poll(Duration timeout) {
+        try {
+            return consumer.poll(timeout);
+        } catch (AuthorizationException e) {
+            throw new LaneAccessDeniedException("request lanes denied: " + e.getClass().getSimpleName(), e);
+        }
     }
 
     /** Polled-but-not-returned requests (surplus over the quotas). */
@@ -144,7 +173,7 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         }
         if (buffered.isEmpty()) {
             consumer.resume(consumer.assignment());
-            for (ConsumerRecord<byte[], byte[]> record : consumer.poll(POLL_TIMEOUT)) {
+            for (ConsumerRecord<byte[], byte[]> record : poll(POLL_TIMEOUT)) {
                 buffered.add(toIncoming(laneBySource.get(record.topic()), record));
             }
         }
@@ -156,7 +185,7 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         consumer.pause(consumer.assignment());
         // partitions assigned by a rebalance inside this poll start unpaused: rewind whatever it returned
         Map<TopicPartition, Long> rewind = new LinkedHashMap<>();
-        for (ConsumerRecord<byte[], byte[]> record : consumer.poll(Duration.ZERO)) {
+        for (ConsumerRecord<byte[], byte[]> record : poll(Duration.ZERO)) {
             rewind.putIfAbsent(new TopicPartition(record.topic(), record.partition()), record.offset());
         }
         rewind.forEach(consumer::seek);
@@ -179,7 +208,7 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
     public List<IncomingRequest> fetch(Map<String, Integer> quotaByLane) {
         applyPauses(quotaByLane);
         if (!covers(quotaByLane)) {
-            for (ConsumerRecord<byte[], byte[]> record : consumer.poll(Duration.ZERO)) {
+            for (ConsumerRecord<byte[], byte[]> record : poll(Duration.ZERO)) {
                 buffered.add(toIncoming(laneBySource.get(record.topic()), record));
             }
         }
