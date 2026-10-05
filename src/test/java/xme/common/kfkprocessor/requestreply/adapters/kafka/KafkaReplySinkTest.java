@@ -46,8 +46,9 @@ class KafkaReplySinkTest {
      * records"). A batch without a faulty record is delivered.
      */
     private static final class Producer extends MockProducer<byte[], byte[]> {
-        static final String SIBLING_MESSAGE =
-                "The request included a record that is part of a batch which had one more more invalid records";
+        // exact text of Sender.failBatch in kafka-clients 4.2.1 (including its "one more more" typo)
+        static final String SIBLING_MESSAGE = "Failed to append record because it was part of a batch "
+                + "which had one more more invalid records";
 
         Function<ProducerRecord<byte[], byte[]>, RuntimeException> fault = r -> null;
         boolean viaCallback = true;

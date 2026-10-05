@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -253,14 +254,38 @@ class DefaultKafkaDestinationProbeTest {
         KafkaFutureImpl<Config> f = new KafkaFutureImpl<>();
         f.completeExceptionally(new org.apache.kafka.common.errors.TopicAuthorizationException("no describe configs"));
         cleanupPolicy(f);
-        RuntimeException thrown = null;
-        try {
-            probe().probe();
-        } catch (RuntimeException e) {
-            thrown = e;
-        }
-        assertTrue(thrown == null || !(thrown instanceof ReplyDestinationFault.Invalid),
-                "not Invalid/compacted: " + thrown);
+        assertDoesNotThrow(() -> probe().probe());
+        assertConfigDescribed();
+    }
+
+    // the config describe never answers within the probe's timeout: best effort, the probe still passes
+    @Test
+    @SuppressWarnings("unchecked")
+    void timedOutConfigDescribeDoesNotRefuse() throws Exception {
+        allGranted();
+        KafkaFuture<Config> f = mock(KafkaFuture.class);
+        when(f.get(anyLong(), any(java.util.concurrent.TimeUnit.class)))
+                .thenThrow(new java.util.concurrent.TimeoutException("describeConfigs timed out"));
+        cleanupPolicy(f);
+        assertDoesNotThrow(() -> probe().probe());
+        assertConfigDescribed();
+    }
+
+    // a broker that returns no cleanup.policy entry at all is not an error
+    @Test
+    void configWithoutCleanupPolicyEntryDoesNotRefuse() {
+        allGranted();
+        cleanupPolicy(KafkaFuture.completedFuture(new Config(List.of())));
+        assertDoesNotThrow(() -> probe().probe());
+        assertConfigDescribed();
+    }
+
+    // a cleanup.policy entry whose value is null (e.g. sensitive/unreadable) is not an error
+    @Test
+    void cleanupPolicyEntryWithNullValueDoesNotRefuse() {
+        allGranted();
+        cleanupPolicy(KafkaFuture.completedFuture(new Config(List.of(new ConfigEntry("cleanup.policy", null)))));
+        assertDoesNotThrow(() -> probe().probe());
         assertConfigDescribed();
     }
 
