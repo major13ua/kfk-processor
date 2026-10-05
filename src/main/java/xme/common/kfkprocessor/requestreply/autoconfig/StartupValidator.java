@@ -63,6 +63,12 @@ public class StartupValidator {
             if (!names.add(lane.getName())) {
                 throw refuse("lane_name_duplicate", "Lane name '" + lane.getName() + "' is used more than once.");
             }
+            try {
+                org.apache.kafka.common.internals.Topic.validate(lane.getSource());
+            } catch (org.apache.kafka.common.errors.InvalidTopicException e) {
+                throw refuse("lane_source_invalid", "The request source '" + lane.getSource() + "' of lane '"
+                        + lane.getName() + "' is not a valid topic name: " + e.getMessage());
+            }
             if (!sources.add(lane.getSource())) {
                 throw refuse("lane_source_duplicate",
                         "Request source '" + lane.getSource() + "' is used by more than one lane.");

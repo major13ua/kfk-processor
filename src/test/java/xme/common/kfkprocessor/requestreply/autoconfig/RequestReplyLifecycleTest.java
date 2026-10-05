@@ -71,6 +71,27 @@ class RequestReplyLifecycleTest {
         assertTrue(probes.get() >= 2, "probed again on the probe interval, was " + probes.get());
     }
 
+    // F27 / AC-09: an Invalid destination refuses the start; the loop never runs and nothing is fetched
+    @Test
+    void invalidDestinationRefusesStartAndNeverStartsTheLoop() throws Exception {
+        CountingLanes lanes = new CountingLanes();
+        WorkerState state = new WorkerState(Clock.systemUTC(), Duration.ofSeconds(60), mock(WorkerMetrics.class));
+        CycleLoop<?, ?, ?> loop = new CycleLoop<>(null, null, null, state, null, Clock.systemUTC(),
+                Duration.ofSeconds(5), r -> null, Duration.ofHours(1), Duration.ofMillis(200), a -> { });
+        var lifecycle = new RequestReplyLifecycle(loop, lanes, () -> {
+            throw new ReplyDestinationFault.Invalid(
+                    "invalid topic name 'bad topic' [request_reply.config.reply_destination_invalid]", null);
+        }, state, a -> { }, Duration.ofMillis(200), true);
+
+        RuntimeException e = org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, lifecycle::start);
+        assertTrue(e.getMessage().contains("request_reply.config."), e.getMessage());
+        assertTrue(e.getMessage().contains("bad topic"), e.getMessage());
+        assertTrue(!lifecycle.isRunning(), "not running after a refused start");
+        Thread.sleep(300);
+        assertEquals(0, lanes.fetches.get(), "loop never fetched");
+        assertEquals(0, lanes.keepAlives.get(), "no permission gate keep-alive");
+    }
+
     private static void waitFor(String what, Duration timeout, java.util.function.BooleanSupplier condition)
             throws InterruptedException {
         long deadline = System.nanoTime() + timeout.toNanos();

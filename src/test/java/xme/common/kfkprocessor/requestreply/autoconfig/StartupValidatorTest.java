@@ -247,8 +247,32 @@ class StartupValidatorTest {
             RequestReplyProperties p = valid();
             p.setReplyDestination(bad);
             ConfigurationRefusedException e = refused(p, 1);
-            assertTrue(e.code().startsWith("request_reply.config.reply_destination"), e.code());
+            assertEquals("request_reply.config.reply_destination_invalid", e.code(), "for '" + bad + "'");
             assertTrue(e.getMessage().contains("reply"), e.getMessage());
         }
+    }
+
+    // F27 / AC-02: an invalid lane source topic name refuses to start with the exact code, naming lane and topic
+    @Test
+    void invalidLaneSourceTopicNameIsRefusedNamingLaneAndTopic() {
+        for (String bad : List.of("bad topic", "or/ders", ".", "..", "orders!", "a".repeat(250))) {
+            RequestReplyProperties p = valid();
+            p.getLanes().get(1).setSource(bad);
+            ConfigurationRefusedException e = refused(p, 1);
+            assertEquals("request_reply.config.lane_source_invalid", e.code(), "for '" + bad + "'");
+            assertTrue(e.getMessage().contains("request_reply.config.lane_source_invalid"), e.getMessage());
+            assertTrue(e.getMessage().contains("'b'"), "names the lane: " + e.getMessage());
+            if (bad.length() < 100) {
+                assertTrue(e.getMessage().contains(bad), "names the topic: " + e.getMessage());
+            }
+        }
+    }
+
+    @Test
+    void validLaneSourceNamesStillPass() {
+        RequestReplyProperties p = valid();
+        p.getLanes().get(0).setSource("orders.high-priority_v1");
+        p.getLanes().get(1).setSource("a".repeat(249));
+        assertDoesNotThrow(() -> validator.validate(p, 1));
     }
 }

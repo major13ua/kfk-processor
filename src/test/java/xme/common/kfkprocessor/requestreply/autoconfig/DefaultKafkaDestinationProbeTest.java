@@ -183,6 +183,19 @@ class DefaultKafkaDestinationProbeTest {
         f.completeExceptionally(new org.apache.kafka.common.errors.InvalidTopicException("bad topic name"));
         describeTopicsReturns(f);
         RuntimeException e = assertThrows(RuntimeException.class, () -> probe().probe());
-        assertTrue(!(e instanceof ReplyDestinationFault.Unavailable), "got " + e);
+        assertInstanceOf(ReplyDestinationFault.Invalid.class, e);
+        assertTrue(e.getCause() instanceof org.apache.kafka.common.errors.InvalidTopicException, "cause: " + e.getCause());
+    }
+
+    // F27: the Invalid fault names a config code and the topic so the operator can fix it
+    @Test
+    void invalidFaultNamesConfigCodeAndTopic() {
+        allGranted();
+        KafkaFutureImpl<Map<String, TopicDescription>> f = new KafkaFutureImpl<>();
+        f.completeExceptionally(new org.apache.kafka.common.errors.InvalidTopicException("bad topic name"));
+        describeTopicsReturns(f);
+        RuntimeException e = assertThrows(ReplyDestinationFault.Invalid.class, () -> probe().probe());
+        assertTrue(e.getMessage().contains("request_reply.config."), e.getMessage());
+        assertTrue(e.getMessage().contains(REPLIES), e.getMessage());
     }
 }

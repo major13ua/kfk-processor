@@ -60,7 +60,7 @@ final class DefaultKafkaDestinationProbe implements DestinationProbe {
             }
             checkTransactionalId(admin);
         } catch (ExecutionException e) {
-            throw fault(e.getCause());
+            throw fault(e.getCause(), topic, laneSources);
         } catch (TimeoutException e) {
             throw new ReplyDestinationFault.Unavailable("reply destination unavailable", e);
         } catch (InterruptedException e) {
@@ -96,9 +96,11 @@ final class DefaultKafkaDestinationProbe implements DestinationProbe {
         }
     }
 
-    private static ReplyDestinationFault fault(Throwable cause) {
+    private static ReplyDestinationFault fault(Throwable cause, String replyTopic, List<String> sources) {
         if (cause instanceof org.apache.kafka.common.errors.InvalidTopicException) {
-            return new ReplyDestinationFault.Invalid("reply destination or request lane has an invalid topic name", cause);
+            return new ReplyDestinationFault.Invalid("reply destination or request lane has an invalid topic name"
+                    + " (reply destination '" + replyTopic + "', request lanes " + sources + ")"
+                    + " [request_reply.config.reply_destination_invalid]", cause);
         }
         if (cause instanceof AuthorizationException
                 || cause instanceof org.apache.kafka.common.errors.AuthenticationException) {

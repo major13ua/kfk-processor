@@ -99,6 +99,7 @@ Startup validation (flow 4) fails with a plain-language message naming the confl
 | `request_reply.config.lanes_missing` | no lane configured |
 | `request_reply.config.lane_incomplete` | a lane without name or source |
 | `request_reply.config.lane_name_duplicate` | two lanes with the same name |
+| `request_reply.config.lane_source_invalid` | a lane source is not a valid topic name |
 | `request_reply.config.lane_source_duplicate` | two lanes reading the same source |
 | `request_reply.config.handler_types_unsupported` | Handler `K`, `REQ` or `RES` resolves to a type other than `String` |
 | `request_reply.config.ssl_bundles_missing` | an SSL bundle named by the Kafka connection details is not defined |
