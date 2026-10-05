@@ -49,8 +49,8 @@ A reusable worker starter: global Rate Budget at intake, weighted Priority Lanes
 | AC-09 authorization | `missing write permission on reply destination at startup stops intake` | integration | Configuration fault reported, no request accepted, no request lost, stays in group |
 | AC-09 authorization | `permission revoked mid-cycle pauses without re-running handlers` | integration | Cycle in progress not re-executed, worker pauses and shows paused state |
 | AC-09 authorization | `permission restored resumes intake automatically` | integration | Intake resumes with no restart, no lane reassignment |
-| AC-10 happy path | `accepted requests across workers stay within budget in any one-second window` | integration + load | Max accepted in any sliding second at most budget plus 5 percent |
-| AC-10 happy path | `request counts as accepted when handed to a handler` | unit | One allowance unit taken at hand-off, not at fetch |
+| AC-10 happy path | `accepted requests across workers stay within budget in any one-second window` | integration + load | Max accepted in any sliding second at most budget x 1.10 (Tech Lead, 2026-10-05); budgets of 20 or more |
+| AC-10 happy path | `request counts as accepted when handed to a handler` | unit | One allowance unit taken at intake, when the request is handed over to the Handler stage; not for malformed or oversized requests |
 | AC-10b domain invariant | `no allowance leaves requests unconsumed and unanswered` | integration | Remaining requests stay on the platform, no reply, picked up by a later Cycle |
 | AC-10b domain invariant | `malformed or oversized request gets error reply without using allowance` | unit + integration | Error Reply sent, allowance counter unchanged |
 | AC-11 happy path | `lane shares match weights when all lanes are busy` | unit + load | Each lane within 10 percentage points of its effective share |

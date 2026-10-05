@@ -2,7 +2,7 @@
 status: Draft
 owner: "Ievgen Chupryna"
 reviewers: ["Tech Lead", "Security Lead"]
-updated_at: "2026-10-04"
+updated_at: "2026-10-05"
 feature_size: "M"
 ---
 
@@ -22,6 +22,8 @@ Committed approach: a reusable internal starter where a team supplies only a Han
 Traceability: decisions fixed in the interview (2026-10-03/04): N configurable lanes with one consumer per lane; weighted-share priority; per-request error replies with batch commit; at-least-once handlers with an Idempotency Key; per-request timeout plus Cycle deadline validated at startup; global Rate Budget with a pluggable shared store (first adapter assumes an already-operated in-memory store), fail closed when it is unavailable; stable-identity deployment only; fixed reply destination with correlation echoed; full custom engine (the thin-layer alternative was declined); acceptance by a failure-scenario test suite.
 
 Decision override: 30 s Handler timeout with a fixed 60 s stall threshold, kept as chosen by the author at critic review (the critic flagged false stall alerts for commit windows of 75 s or more, and a head-of-line delay of up to the Cycle deadline for high-weight lanes). The Tech Lead confirms this knowingly via the open question on provisional numbers in §8.
+
+Decision override: Rate Budget accuracy tolerance widened from x1.05 to x1.10 (introduced in commit 23a544b; confirmed by the Tech Lead on 2026-10-05). The allowance is counted at intake, when the Handler hand-off is prepared, as implemented; the burst cap of the shared counter stays budget/20. Small test budgets (below 20) have no margin and must not be used for the accuracy assertion.
 
 ## 2. Goals
 
@@ -249,7 +251,7 @@ Provisional numbers are marked and confirmed or deferred in §8.
 ## 8. Open questions
 
 - [ ] What is the trigger and deadline for this work (incident, contract, planned service)? Default now: none stated, treated as a platform investment. owner: Product Owner, due: before `sdd:design`
-- [ ] Are the provisional NFR numbers right (2,000 requests/s, 5% budget tolerance, 30 s Handler timeout, 80% Cycle deadline, 60 s commit window, 45 s identity window, 60 s stall threshold)? Note: with 30 s Handler timeout, one slow request can hold a whole Cycle, high-weight lanes included, for up to the Cycle deadline, and the fixed 60 s stall threshold gives false stalls if the commit window is 75 s or more. Default now: as listed in §6. owner: Tech Lead, due: before `sdd:design`
+- [ ] Are the provisional NFR numbers right (2,000 requests/s, budget tolerance x1.10 (confirmed 2026-10-05, see §1), 30 s Handler timeout, 80% Cycle deadline, 60 s commit window, 45 s identity window, 60 s stall threshold)? Note: with 30 s Handler timeout, one slow request can hold a whole Cycle, high-weight lanes included, for up to the Cycle deadline, and the fixed 60 s stall threshold gives false stalls if the commit window is 75 s or more. Default now: as listed in §6. owner: Tech Lead, due: before `sdd:design`
 - [ ] Do idle lanes hand their share to busy lanes, and what is the minimum share that prevents starvation? Default now: idle shares are redistributed, minimum share 5%. owner: Product Owner, due: before `sdd:design`
 - [ ] Which already-operated shared store hosts the Rate Budget? Default now: the in-memory store XME already runs, first adapter; others pluggable. owner: Tech Lead, due: before `sdd:design`
 - [ ] What are the correlation identifier name, the echo rules and the Error Reply format (category list)? Default now: correlation echoed unchanged, categories: failure, timeout, undeliverable. owner: Tech Lead, due: before `sdd:api`
@@ -257,3 +259,9 @@ Provisional numbers are marked and confirmed or deferred in §8.
 - [ ] Per-Request-Key ordering (AC-07c) may cut parallelism when many requests share a key, against the 2,000 requests/s target. Default now: ordering kept per key, target measured with the pilot service's real key distribution. owner: Tech Lead, due: before `sdd:design`
 - [ ] Stable-identity workers that are lost or scaled down hold their lanes until the Identity window ends. Is a runbook plus a stranded-lane alert enough? Default now: yes. owner: Operator lead, due: before `sdd:tasks`
 - [ ] Target and baseline for Consistency Lag p95 and the adoption timeframe? Default now: measure the pilot service first. owner: Product Owner, due: before the first production release
+- [ ] Rate Budget change never reaches a running group: the shared counter keeps its first capacity (Bucket4jBudgetCounters). Default now: documented in the guide, change only by a rollout with a counter key reset. owner: Tech Lead, due: before the first production release
+- [ ] Redis down at worker startup crashes the context instead of starting paused (AC-18 covers only an outage while running). Default now: the Operator restores the store before start. owner: Tech Lead, due: before the first production release
+- [ ] Commit retries run back-to-back without backoff (CommitRetry). Default now: `commit-retry-attempts` small, then pause and probe every `probe-interval`. owner: Tech Lead, due: before the first production release
+- [ ] Timed-out Handler threads are never interrupted, only signalled (cooperative, AC-07 and public-api). Is a hard interrupt wanted for non-cooperative Handlers? Default now: cooperative only, as specified. owner: Tech Lead, due: before the first production release
+- [ ] Lag plausibility bound (1 day) is too loose for skewed timestamps; should it be configurable? Default now: 1 day. owner: Tech Lead, due: before the first production release
+- [ ] Stranded-lane alert (SAD §8) is not implemented: no worker-side signal exists. Default now: runbook watches `requestreply.group.membership.changes` and Consistency Lag. owner: Operator lead, due: before the first production release

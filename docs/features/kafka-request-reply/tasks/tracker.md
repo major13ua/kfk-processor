@@ -39,4 +39,4 @@
 | F7 | Probe (B10) | done |
 | F8 | Per-lane key chains (B11) | done |
 | F9 | Test gaps (Group D) | done |
-| F10 | Spec drift + stage-2 docs (Group C) | todo |
+| F10 | Spec drift + stage-2 docs (Group C) | done |

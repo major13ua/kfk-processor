@@ -111,13 +111,13 @@ Metric `requestreply.state` is a gauge with ordinal values `0 = running` (includ
 | State | Meaning | Operator action |
 |---|---|---|
 | running | Intake and Cycles are working, or nothing is pending (idle raises no stall) | none |
-| paused (limiter) | Allowance store unreachable. Intake failed closed, worker stays in its group, resumes by itself when the store returns, without exceeding the budget. Fault id `request_reply.rate_budget_store.unavailable` is defined in public-api.md but not emitted by the code; this pause shows only in `requestreply.state` | restore the Redis-compatible store |
+| paused (limiter) | Allowance store unreachable. Intake failed closed, worker stays in its group, resumes by itself when the store returns, without exceeding the budget. Alert fault id `request_reply.rate_budget_store.unavailable`, raised once per outage, also shown in `requestreply.state` | restore the Redis-compatible store |
 | paused (destination) | Commit failed after `commit-retry-attempts`, or the reply destination is unavailable. Results are held in memory, the worker probes every `probe-interval` and re-commits in a new transaction. Alert fault id `request_reply.reply_destination.unavailable` | fix the broker or destination |
 | paused (permission) | No write permission on the reply destination or its transactional id, or no read permission on a lane, found by the start probe, or no write permission on a later commit. At start the worker keeps its group membership with every lane paused and starts by itself once the probe succeeds. Alert fault id `request_reply.reply_destination.permission_denied`. The transactional id is `request-reply-<len>:<group>:<identity>` and needs WRITE (and DESCRIBE) | grant the ACL (reply topic WRITE, lane topics READ, group READ, transactional id WRITE) |
 | paused (lane permission) | A poll after start is denied READ on a lane or the group. The worker pauses, raises the alert once and retries every `probe-interval`, then resumes by itself. Alert fault id `request_reply.request_lane.permission_denied` | grant read permission (ACL) |
 | stalled | Work pending or a Cycle open and no commit for longer than `stall-threshold` (60 s, provisional) | check Handlers and commit, see below |
 
-Alert wiring: the commit and permission pauses call the `requestReplyAlertListener` bean with the pause reason and fault id. Register your own bean to route them to paging. Limiter pause and stall are visible through `requestreply.state` only.
+Alert wiring: the limiter, commit and permission pauses call the `requestReplyAlertListener` bean with the pause reason and fault id. Register your own bean to route them to paging. A stall is visible through `requestreply.state` only.
 
 If the worker pauses while results are held in memory and then crashes, those Handlers run again after restart (at-least-once).
 
@@ -127,7 +127,7 @@ Likely causes: slow Handlers holding a Cycle up to the Cycle deadline, a slow co
 
 ### Stranded lane
 
-A worker that is lost or scaled down and does not return keeps its partitions until the identity window ends (45 s, provisional); those lanes are not consumed during that time. After the window the broker reassigns them. If a worker stays gone: confirm the replica is really removed, wait for the window, and watch `requestreply.group.membership.changes` and Consistency Lag for the affected lanes. Scaling down permanently should be done by removing replicas one at a time. A dedicated stranded-lane alert is planned in the SAD but is not implemented in the code, see [Open points](#open-points).
+A worker that is lost or scaled down and does not return keeps its partitions until the identity window ends (45 s, provisional); those lanes are not consumed during that time. After the window the broker reassigns them. If a worker stays gone: confirm the replica is really removed, wait for the window, and watch `requestreply.group.membership.changes` and Consistency Lag for the affected lanes. Scaling down permanently should be done by removing replicas one at a time. There is no worker-side signal and no dedicated alert for a stranded lane (planned in the SAD, not implemented; see [Open points](#open-points)). What an Operator can observe: a rise of Consistency Lag on the affected lanes, a lane's `requestreply.accepted` rate falling while its backlog grows (broker-side consumer lag), and `requestreply.group.membership.changes` on the remaining workers after the window ends. Alert on broker-side consumer lag per lane.
 
 ### Metrics (proposals until spec §8 Q5 closes)
 
@@ -149,10 +149,12 @@ Tags are limited to `lane` and `category`.
 
 ## 6. Known behaviours
 
-- **Rate Budget burst cap is budget/20.** The shared counter's burst capacity is `max(1, budget / 20)` (5%). This keeps any sliding second near budget x 1.05. A consequence: with slow Cycles, throughput can fall below the configured budget, because unused allowance cannot accumulate beyond the cap. Budgets under 20 keep a minimum capacity of 1.
-- **Rate Budget accuracy NFR is x1.10.** Accepted rate must stay at or under budget x 1.10 in any sliding 1 s window. The Tech Lead widened it from x1.05 to x1.10 (commit 23a544b). Measured peaks went up to about x1.075. The value is still labelled provisional in spec §6.
-- **Hot-key ordering throttles one partition.** Requests with the same Request Key run one after another, so a hot key limits parallelism. The `loadTest` hot-key phase measured 863 requests/s against the provisional 2,000 requests/s target (commit 827379a: "reported, not hidden"). The "3000/s" figure quoted in the task request is not found in the code, tests or docs and is not used here.
+- **Rate Budget burst cap is budget/20.** The shared counter's burst capacity is `max(1, budget / 20)` (5%). This keeps any sliding second within budget x 1.10. A consequence: with slow Cycles, throughput can fall below the configured budget, because unused allowance cannot accumulate beyond the cap. Budgets under 20 keep a minimum capacity of 1.
+- **Rate Budget accuracy NFR is x1.10.** Accepted rate must stay at or under budget x 1.10 in any sliding 1 s window. The Tech Lead widened it from x1.05 to x1.10 and confirmed it on 2026-10-05 (spec §1). Allowance is counted at intake. Measured peaks went up to about x1.075. The value is still labelled provisional in spec §6.
+- **Hot-key ordering throttles one partition.** Requests with the same Request Key run one after another, so a hot key limits parallelism. The `loadTest` hot-key phase measured 863 requests/s against the provisional 2,000 requests/s target.
 - **Throughput target is asserted for unique keys only.** `loadTest` fails when the unique-key phase is below the target; the fast-Handler and hot-key phases print a MISSED line and do not fail.
+- **A Rate Budget change does not reach a running group.** The shared counter keeps its first capacity; change the budget by a full rollout and reset the counter key (spec §8).
+- **The allowance store must be up at start.** If Redis is down while the worker starts, the context fails to start instead of starting paused (spec §8).
 - **Cross-lane ordering is not guaranteed** (section 3, rule 2).
 - **Head-of-line delay.** One slow request can hold its Cycle for up to the Cycle deadline, including requests of high-weight lanes.
 - **Priority is a share of the Rate Budget**, not strict precedence. Idle lanes hand their share to busy lanes.
