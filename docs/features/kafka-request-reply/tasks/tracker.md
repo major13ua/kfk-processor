@@ -89,5 +89,5 @@
 
 | # | Task | Status |
 |---|---|---|
-| F35 | Sink: all-rejected round of no-fallback Error Replies pauses without loss (G1) | todo |
+| F35 | Sink: all-rejected round of no-fallback Error Replies pauses without loss (G1) | done |
 | F36 | Tests: config-describe failure, absent cleanup.policy, sibling fake message (G4) | todo |

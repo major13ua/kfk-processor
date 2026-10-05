@@ -292,7 +292,7 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
                 p.flush();
                 int rejected = firstFailed(async);
                 if (rejected >= 0) {
-                    if (destinationWideRejection(async, stage)) {
+                    if (destinationWideRejection(async, stage, replies)) {
                         throw destinationFault(async.get(rejected));
                     }
                     // the siblings of a rejected record fail as collateral: only the first true failure is demoted
@@ -401,9 +401,10 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
 
     /**
      * True when every reply sent in the round was rejected as an invalid record and at least one of them was
-     * already on its fallback: the cause is the destination (e.g. a compacted topic, timestamp bounds), not a reply.
+     * already on its last stage (its fallback, or the primary value of a reply that has no fallback): the cause is the destination (e.g. a compacted topic, timestamp bounds), not a reply.
      */
-    private static boolean destinationWideRejection(AtomicReferenceArray<Exception> async, int[] stage) {
+    private static boolean destinationWideRejection(AtomicReferenceArray<Exception> async, int[] stage,
+                                                        List<ReplyRecord> replies) {
         boolean onFallback = false;
         for (int i = 0; i < async.length(); i++) {
             if (stage[i] >= DROPPED) {
@@ -412,7 +413,7 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
             if (!(async.get(i) instanceof org.apache.kafka.common.InvalidRecordException)) {
                 return false;
             }
-            onFallback |= stage[i] == FALLBACK;
+            onFallback |= stage[i] == FALLBACK || replies.get(i).fallback() == null;
         }
         return onFallback;
     }

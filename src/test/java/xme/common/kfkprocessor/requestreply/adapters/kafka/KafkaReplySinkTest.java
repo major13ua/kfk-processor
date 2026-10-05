@@ -598,6 +598,62 @@ class KafkaReplySinkTest {
         assertTrue(p.consumerGroupOffsetsHistory().isEmpty());
     }
 
+    private static ReplyRecord errorReply(long position, String corr, String value) {
+        return new ReplyRecord("high", 0, position, corr, "key-" + corr, b(value), true, null);
+    }
+
+    private static void assertNothingDroppedNothingCommitted(Producer p) {
+        assertFalse(p.transactionCommitted());
+        assertTrue(p.consumerGroupOffsetsHistory().isEmpty());
+        assertTrue(p.history().isEmpty());
+    }
+
+    // review r6 G1, F35, AC-08/AC-08b: a Cycle made only of Error Replies (no fallback) where every send is rejected
+    // with InvalidRecordException is a destination fault, not a per-reply drop: nothing committed, nothing dropped
+    @Test
+    void cycleOfOnlyErrorRepliesAllInvalidRecordRejectedIsADestinationFaultInBatchedMode() {
+        var p = new Producer();
+        p.batched = true;
+        p.fault = r -> new org.apache.kafka.common.InvalidRecordException("Timestamp 1 of message is out of bounds");
+        assertThrows(ReplyDestinationFault.Unavailable.class, () -> sink(p).commit(List.of(
+                errorReply(0, "c-0", "e0"), errorReply(1, "c-1", "e1"), errorReply(2, "c-2", "e2"))));
+        assertNothingDroppedNothingCommitted(p);
+    }
+
+    // same, per-record rejection (not batch-wise)
+    @Test
+    void cycleOfOnlyErrorRepliesAllInvalidRecordRejectedIsADestinationFaultInPerRecordMode() {
+        var p = new Producer();
+        p.fault = r -> new org.apache.kafka.common.InvalidRecordException("rejected");
+        assertThrows(ReplyDestinationFault.Unavailable.class, () -> sink(p).commit(List.of(
+                errorReply(0, "c-0", "e0"), errorReply(1, "c-1", "e1"))));
+        assertNothingDroppedNothingCommitted(p);
+    }
+
+    // guard (already true): one Error Reply plus a normal reply with fallback, everything rejected, still pauses
+    @Test
+    void cycleMixingAnErrorReplyAndANormalReplyAllInvalidRecordRejectedStillPauses() {
+        var p = new Producer();
+        p.batched = true;
+        p.fault = r -> new org.apache.kafka.common.InvalidRecordException("rejected");
+        assertThrows(ReplyDestinationFault.Unavailable.class, () -> sink(p).commit(List.of(
+                errorReply(0, "c-0", "e0"),
+                withFallback("high", 0, 1, "c-1", b("b"), b("undeliverable-1")))));
+        assertNothingDroppedNothingCommitted(p);
+    }
+
+    // pin: a single no-fallback reply rejected with InvalidRecordException cannot be told from a destination-wide
+    // cause, so it pauses (destination fault), it is not dropped
+    @Test
+    void singleNoFallbackReplyRejectedWithInvalidRecordPausesAsDestinationFault() {
+        var p = new Producer();
+        p.batched = true;
+        p.fault = r -> new org.apache.kafka.common.InvalidRecordException("rejected");
+        assertThrows(ReplyDestinationFault.Unavailable.class,
+                () -> sink(p).commit(List.of(errorReply(0, "c-0", "e0"))));
+        assertNothingDroppedNothingCommitted(p);
+    }
+
     // AC-09 (review B10): security settings reach the producer
     @Test
     void producerGetsTheSharedClientProperties() {
