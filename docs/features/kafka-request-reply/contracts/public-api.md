@@ -93,6 +93,7 @@ Startup validation (flow 4) fails with a plain-language message naming the confl
 | `request_reply.config.weight_not_positive` | lane weight ≤ 0 |
 | `request_reply.config.identity_missing` | no explicit worker identity |
 | `request_reply.config.reply_destination_missing` | `reply-destination` blank |
+| `request_reply.config.reply_destination_invalid` | `reply-destination` is not a valid Kafka topic name |
 | `request_reply.config.rate_budget_not_positive` | `rate-budget-per-second` ≤ 0 |
 | `request_reply.config.draw_per_round_not_positive` | `draw-per-round` ≤ 0 |
 | `request_reply.config.lanes_missing` | no lane configured |

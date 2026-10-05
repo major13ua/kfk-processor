@@ -34,6 +34,13 @@ public class StartupValidator {
             throw refuse("reply_destination_missing",
                     "No reply destination: set xme.request-reply.reply-destination.");
         }
+        try {
+            org.apache.kafka.common.internals.Topic.validate(props.getReplyDestination());
+        } catch (org.apache.kafka.common.errors.InvalidTopicException e) {
+            throw refuse("reply_destination_invalid",
+                    "The reply destination '" + props.getReplyDestination() + "' is not a valid topic name: "
+                            + e.getMessage());
+        }
         if (props.getRateBudgetPerSecond() <= 0) {
             throw refuse("rate_budget_not_positive", "Rate Budget is " + props.getRateBudgetPerSecond()
                     + " per second but must be above 0: set xme.request-reply.rate-budget-per-second.");

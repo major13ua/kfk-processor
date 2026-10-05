@@ -439,8 +439,7 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         if (e instanceof org.apache.kafka.common.errors.SerializationException) {
             return Reason.UNENCODABLE;
         }
-        if (e instanceof org.apache.kafka.common.errors.CorruptRecordException
-                || e instanceof org.apache.kafka.common.errors.InvalidTopicException) {
+        if (e instanceof org.apache.kafka.common.errors.CorruptRecordException) {
             return Reason.REJECTED;
         }
         return null;

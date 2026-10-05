@@ -153,4 +153,36 @@ class DefaultKafkaDestinationProbeTest {
         org.mockito.Mockito.verify(admin, org.mockito.Mockito.times(2)).close(java.time.Duration.ZERO);
         org.mockito.Mockito.verify(admin, org.mockito.Mockito.never()).close();
     }
+
+    // review r3 B4 / AC-09: TLS/SASL authentication failure is permission-denied, as in the sink and the lanes
+    @Test
+    void authenticationFailureIsPermissionDeniedNotUnavailable() {
+        allGranted();
+        KafkaFutureImpl<Map<String, TopicDescription>> f = new KafkaFutureImpl<>();
+        f.completeExceptionally(new org.apache.kafka.common.errors.SaslAuthenticationException("bad credentials"));
+        describeTopicsReturns(f);
+        assertInstanceOf(ReplyDestinationFault.PermissionDenied.class,
+                assertThrows(ReplyDestinationFault.class, () -> probe().probe()));
+    }
+
+    @Test
+    void sslHandshakeFailureIsPermissionDeniedNotUnavailable() {
+        allGranted();
+        KafkaFutureImpl<Map<String, TopicDescription>> f = new KafkaFutureImpl<>();
+        f.completeExceptionally(new org.apache.kafka.common.errors.SslAuthenticationException("handshake failed"));
+        describeTopicsReturns(f);
+        assertInstanceOf(ReplyDestinationFault.PermissionDenied.class,
+                assertThrows(ReplyDestinationFault.class, () -> probe().probe()));
+    }
+
+    // review r3 B1: an invalid topic name must not come back as Unavailable (the loop would start and lose requests)
+    @Test
+    void invalidTopicIsNotReportedAsUnavailable() {
+        allGranted();
+        KafkaFutureImpl<Map<String, TopicDescription>> f = new KafkaFutureImpl<>();
+        f.completeExceptionally(new org.apache.kafka.common.errors.InvalidTopicException("bad topic name"));
+        describeTopicsReturns(f);
+        RuntimeException e = assertThrows(RuntimeException.class, () -> probe().probe());
+        assertTrue(!(e instanceof ReplyDestinationFault.Unavailable), "got " + e);
+    }
 }

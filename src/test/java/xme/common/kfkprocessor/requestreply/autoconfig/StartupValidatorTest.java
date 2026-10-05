@@ -239,4 +239,16 @@ class StartupValidatorTest {
         assertDoesNotThrow(() -> validator.validateHandlerTypes(null, null, null));
         assertDoesNotThrow(() -> validator.validateHandlerTypes(Object.class, Object.class, Object.class));
     }
+
+    // review r3 B1 / AC-09: an invalid reply-destination topic name refuses to start
+    @Test
+    void invalidReplyDestinationTopicNameIsRefused() {
+        for (String bad : List.of("bad topic", "re/plies", "..", "replies!", "a".repeat(250))) {
+            RequestReplyProperties p = valid();
+            p.setReplyDestination(bad);
+            ConfigurationRefusedException e = refused(p, 1);
+            assertTrue(e.code().startsWith("request_reply.config.reply_destination"), e.code());
+            assertTrue(e.getMessage().contains("reply"), e.getMessage());
+        }
+    }
 }

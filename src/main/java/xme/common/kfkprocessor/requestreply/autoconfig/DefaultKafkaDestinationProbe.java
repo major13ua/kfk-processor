@@ -97,7 +97,11 @@ final class DefaultKafkaDestinationProbe implements DestinationProbe {
     }
 
     private static ReplyDestinationFault fault(Throwable cause) {
-        if (cause instanceof AuthorizationException) {
+        if (cause instanceof org.apache.kafka.common.errors.InvalidTopicException) {
+            return new ReplyDestinationFault.Invalid("reply destination or request lane has an invalid topic name", cause);
+        }
+        if (cause instanceof AuthorizationException
+                || cause instanceof org.apache.kafka.common.errors.AuthenticationException) {
             return new ReplyDestinationFault.PermissionDenied("reply destination or request lane denies access", cause);
         }
         return new ReplyDestinationFault.Unavailable("reply destination unavailable", cause);

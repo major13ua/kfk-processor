@@ -31,4 +31,11 @@ public abstract class ReplyDestinationFault extends RuntimeException {
             super(message, cause);
         }
     }
+
+    /** The reply destination name is invalid: no reply can ever be written, the worker must not start. */
+    public static final class Invalid extends ReplyDestinationFault {
+        public Invalid(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
 }

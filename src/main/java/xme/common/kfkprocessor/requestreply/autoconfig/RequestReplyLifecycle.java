@@ -59,6 +59,9 @@ final class RequestReplyLifecycle implements SmartLifecycle {
             gate.setDaemon(true);
             gate.start();
             return;
+        } catch (ReplyDestinationFault.Invalid invalid) {
+            running = false;
+            throw invalid;
         } catch (RuntimeException unavailable) {
             LOG.log(System.Logger.Level.WARNING, "Reply destination probe failed at start: "
                     + unavailable.getClass().getName());

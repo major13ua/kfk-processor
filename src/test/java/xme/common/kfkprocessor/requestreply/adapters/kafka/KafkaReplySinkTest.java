@@ -202,6 +202,27 @@ class KafkaReplySinkTest {
         assertTrue(p.consumerGroupOffsetsHistory().isEmpty());
     }
 
+    // review r3 B1 / AC-08b, AC-09: an invalid reply-destination name is a destination fault, never a per-reply REJECTED
+    @Test
+    void invalidTopicIsADestinationFaultNotAPerReplyRejectionAndNothingCommits() {
+        var p = new Producer();
+        p.fault = r -> new org.apache.kafka.common.errors.InvalidTopicException("bad topic name");
+        assertThrows(ReplyDestinationFault.class,
+                () -> sink(p).commit(List.of(withFallback("high", 0, 1, "c", b("a"), b("undeliverable-c")))));
+        assertFalse(p.transactionCommitted());
+        assertTrue(p.consumerGroupOffsetsHistory().isEmpty());
+    }
+
+    @Test
+    void invalidTopicThrownSynchronouslyOnSendIsAlsoADestinationFault() {
+        var p = new Producer();
+        p.viaCallback = false;
+        p.fault = r -> new org.apache.kafka.common.errors.InvalidTopicException("bad topic name");
+        assertThrows(ReplyDestinationFault.class,
+                () -> sink(p).commit(List.of(reply("high", 0, 1, "c", b("a")))));
+        assertFalse(p.transactionCommitted());
+    }
+
     @Test
     void destinationUnavailableThrownSynchronouslyOnSendIsAlsoTyped() {
         var p = new Producer();
