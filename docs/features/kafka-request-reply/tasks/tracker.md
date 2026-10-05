@@ -84,3 +84,10 @@
 | F32 | Engine: alert streak only reset on COMMITTED, Error on commit path, missing engine tests (R3, R4) | done |
 | F33 | Startup: refuse compacted reply topic, non-vacuous lifecycle test (R4, R5) | done |
 | F34 | Docs: rerun exception, ADR-0007, SAD, fenced wording, dashes, section 8 (R1, R5) | done |
+
+## Review follow-ups round 6 (from `_review/review-2026-10-05-r6.md`)
+
+| # | Task | Status |
+|---|---|---|
+| F35 | Sink: all-rejected round of no-fallback Error Replies pauses without loss (G1) | todo |
+| F36 | Tests: config-describe failure, absent cleanup.policy, sibling fake message (G4) | todo |

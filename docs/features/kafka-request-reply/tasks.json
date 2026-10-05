@@ -957,6 +957,41 @@
         "docs/kafka-request-reply-starter-guide.md"
       ],
       "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r5.md"
+    },
+    {
+      "id": "F35",
+      "title": "Sink: all-rejected round of no-fallback Error Replies is a destination fault, pause without loss (r6 G1)",
+      "layer": "adapter",
+      "deps": [
+        "F34"
+      ],
+      "acs": [
+        "AC-08",
+        "AC-08b"
+      ],
+      "dod": "RED first: batched-mode unit test with Error Replies only (fallback null), every send rejected with InvalidRecordException, expects Unavailable, no transaction commit, no offsets. Then count a no-fallback reply as last stage in destinationWideRejection; decide and document single-reply behaviour in spec section 8.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka",
+        "src/test/java/xme/common/kfkprocessor/requestreply/adapters/kafka"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r6.md"
+    },
+    {
+      "id": "F36",
+      "title": "Tests: config-describe failure and timeout assert no throw, absent and null cleanup.policy case, sibling fake uses the kafka-clients message (r6 G4)",
+      "layer": "autoconfig",
+      "deps": [
+        "F35"
+      ],
+      "acs": [
+        "AC-08b",
+        "AC-09"
+      ],
+      "dod": "assertDoesNotThrow for failed and timed-out describeConfigs; Config without cleanup.policy and ConfigEntry with null value do not throw; fake sibling message equals the kafka-clients text with a version comment. Each test fails when the matching production line is mutated.",
+      "files_hint": [
+        "src/test/java/xme/common/kfkprocessor/requestreply"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r6.md"
     }
   ]
 }
