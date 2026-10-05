@@ -2,7 +2,7 @@
 status: Draft
 owner: "Ievgen Chupryna"
 reviewers: ["Tech Lead", "Security Lead"]
-updated_at: "2026-10-04"
+updated_at: "2026-10-05"
 feature_size: "M"
 target_surfaces: [library-sdk, worker]  # library-sdk: the starter's public Handler + configuration contract; worker: the running engine inside each adopting service. → _shared/surfaces.md
 ---
@@ -214,7 +214,7 @@ sequenceDiagram
         Engine->>Platform: re-commits the held results in a new transaction, Handlers not re-run
     end
     alt commit outstanding past the commit window (producer fenced)
-        Engine->>Operator: pauses, alerts fenced, does not resume by itself
+        Engine->>Operator: pauses, alerts fenced (only if the fence shows on the first commit attempt; after a commit timeout the alert is unavailable, spec §8 A1), does not resume by itself
         Operator->>Engine: restarts the worker, requests are fetched again, Handlers re-run
     end
 ```
