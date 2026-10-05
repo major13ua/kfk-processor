@@ -101,12 +101,13 @@ class CycleLoopTest {
     private static final class FakeSink implements ReplySink {
         final List<List<ReplyRecord>> commits = new ArrayList<>();
         RuntimeException failWith;
+        CommitResult answer = new CommitResult(List.of());
         @Override public CommitResult commit(List<ReplyRecord> replies) {
             if (failWith != null) {
                 throw failWith;
             }
             commits.add(replies);
-            return new CommitResult(List.of());
+            return answer;
         }
     }
 
@@ -582,5 +583,50 @@ class CycleLoopTest {
 
         clock.advance(Duration.ofSeconds(61));
         assertEquals(Status.STALLED, state.evaluate(), "no commit for longer than the threshold with a backlog");
+    }
+
+    // AC-08 (review B7): a reply replaced by its undeliverable Error Reply is counted as UNDELIVERABLE
+    @Test
+    void replySubstitutedByItsUndeliverableErrorReplyIsCountedAsUndeliverable() {
+        IncomingRequest q = reqText("high", "hello");
+        lanes.waiting.add(q);
+        sink.answer = new CommitResult(List.of(new CommitResult.ReplyFailure(
+                q.lane(), q.partition(), q.position(), q.correlationId(), CommitResult.Reason.TOO_LARGE, true)));
+
+        assertEquals(CycleLoop.Iteration.COMMITTED, loopWithAlerts().runOnce());
+
+        assertEquals(List.of(ErrorCategory.UNDELIVERABLE), metrics.errorReplies);
+    }
+
+    // AC-08 (review B7): a reply with no deliverable fallback is not dropped silently: metric, ERROR/WARN log
+    // without payload, and an Operator alert. Assumption: the existing errorReply(UNDELIVERABLE) counter is the
+    // metric and CommitRetry.Alert (fault id naming "undeliverable") is the alert; the spec fixes only AC-08/AC-08b.
+    @Test
+    void replyWithNoDeliverableFallbackIsCountedLoggedWithoutPayloadAndAlerted() {
+        IncomingRequest q = reqText("high", "SECRET-PAYLOAD");
+        lanes.waiting.add(q);
+        sink.answer = new CommitResult(List.of(new CommitResult.ReplyFailure(
+                q.lane(), q.partition(), q.position(), q.correlationId(), CommitResult.Reason.REJECTED, false)));
+        List<java.util.logging.LogRecord> logs = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.logging.Logger jul = java.util.logging.Logger.getLogger(CycleLoop.class.getName());
+        java.util.logging.Handler capture = new java.util.logging.Handler() {
+            @Override public void publish(java.util.logging.LogRecord r) { logs.add(r); }
+            @Override public void flush() { }
+            @Override public void close() { }
+        };
+        jul.addHandler(capture);
+        try {
+            loopWithAlerts().runOnce();
+        } finally {
+            jul.removeHandler(capture);
+        }
+
+        assertEquals(List.of(ErrorCategory.UNDELIVERABLE), metrics.errorReplies, "metric for the dropped reply");
+        assertTrue(logs.stream().anyMatch(r -> r.getLevel().intValue() >= java.util.logging.Level.WARNING.intValue()),
+                "an ERROR/WARN log is written");
+        assertTrue(logs.stream().noneMatch(r -> String.valueOf(r.getMessage()).contains("SECRET-PAYLOAD")),
+                "no payload in the log");
+        assertEquals(1, alerts.size(), "the Operator is alerted");
+        assertTrue(alerts.get(0).faultId().toLowerCase().contains("undeliverable"), alerts.get(0).faultId());
     }
 }

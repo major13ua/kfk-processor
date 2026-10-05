@@ -27,6 +27,8 @@ public final class CycleLoop<K, REQ, RES> {
     private static final long IDLE_BACKOFF_MILLIS = 10;
     private static final String LANE_PERMISSION_DENIED = "request_reply.request_lane.permission_denied";
 
+    private static final String REPLY_UNDELIVERABLE = "request_reply.reply.undeliverable";
+
     private final Intake intake;
     private final HandlerExecutor<K, REQ, RES> executor;
     private final CommitRetry<K, RES> retry;
@@ -138,6 +140,7 @@ public final class CycleLoop<K, REQ, RES> {
             return Iteration.HELD;
         }
         state.setPendingWork(false);
+        reportUndeliverable(committed.get());
         recordLag(results, committed.get());
         return Iteration.COMMITTED;
     }
@@ -182,10 +185,30 @@ public final class CycleLoop<K, REQ, RES> {
             if (held != null && !held.isEmpty()) {
                 intake.committedAfterHold(held.stream().map(HandlerResult::request).toList());
             }
+            reportUndeliverable(out.get());
             recordLag(held == null ? List.of() : held, out.get());
             return Iteration.COMMITTED;
         }
         return Iteration.PAUSED;
+    }
+
+    /**
+     * Replies the sink replaced by their undeliverable Error Reply or could not deliver at all are counted as
+     * UNDELIVERABLE; a reply without any deliverable fallback is also logged (no payload) and alerted once per commit.
+     */
+    private void reportUndeliverable(CommitResult commit) {
+        long dropped = 0;
+        for (CommitResult.ReplyFailure f : commit.failures()) {
+            metrics.errorReply(ErrorCategory.UNDELIVERABLE);
+            if (!f.substituted()) {
+                dropped++;
+            }
+        }
+        if (dropped > 0) {
+            LOG.log(System.Logger.Level.ERROR, dropped + " reply(ies) have no deliverable fallback and were dropped ("
+                    + REPLY_UNDELIVERABLE + ")");
+            alert.accept(new CommitRetry.Alert(WorkerState.PauseReason.DESTINATION, REPLY_UNDELIVERABLE));
+        }
     }
 
     private void recordLag(List<HandlerResult<K, RES>> results, CommitResult commit) {
