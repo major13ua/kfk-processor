@@ -20,6 +20,8 @@ import xme.common.kfkprocessor.requestreply.ports.RequestLanes;
 /** Intake: reserve allowance, split by lane share, fetch, return unused, fail closed (ADR-0003, ADR-0006). */
 public final class Intake {
 
+    private static final System.Logger LOG = System.getLogger(Intake.class.getName());
+
     private final AllowanceStore store;
     private final RequestLanes lanes;
     private final WorkerState state;
@@ -90,6 +92,34 @@ public final class Intake {
         }
         List<IncomingRequest> accepted = new ArrayList<>();
         List<IntakeResult.ImmediateError> errors = new ArrayList<>();
+        try {
+            fetchRounds(granted, accepted, errors);
+        } catch (RuntimeException | Error e) {
+            // nothing fetched so far may be lost (its positions are uncommitted): hand it back and return the units
+            List<IncomingRequest> fetched = new ArrayList<>(accepted);
+            errors.forEach(err -> fetched.add(err.request()));
+            try {
+                lanes.release(fetched);
+                store.giveBack(granted);
+            } catch (RuntimeException suppressed) {
+                e.addSuppressed(suppressed);
+            }
+            throw e;
+        }
+        long unused = granted - accepted.size();
+        if (unused > 0) {
+            try {
+                store.giveBack(unused);
+            } catch (RuntimeException e) {
+                // the requests are already fetched: handing them over beats losing them; the unreturned units
+                // only cost allowance (never exceed the Rate Budget)
+                LOG.log(System.Logger.Level.WARNING, "Returning unused allowance failed: " + e.getClass().getName());
+            }
+        }
+        return new IntakeResult(accepted, errors, false);
+    }
+
+    private void fetchRounds(long granted, List<IncomingRequest> accepted, List<IntakeResult.ImmediateError> errors) {
         Set<String> busy = laneWeights.keySet();
         while (granted - accepted.size() > 0 && !busy.isEmpty()) {
             Map<String, Integer> quota =
@@ -114,11 +144,11 @@ public final class Intake {
             });
             busy = saturated;
         }
-        long unused = granted - accepted.size();
-        if (unused > 0) {
-            store.giveBack(unused);
-        }
-        return new IntakeResult(accepted, errors, false);
+    }
+
+    /** Keeps the group membership alive while the worker is paused or holding a Cycle (consumes nothing). */
+    public void keepAlive() {
+        lanes.keepAlive();
     }
 
     private static IntakeResult paused() {

@@ -44,6 +44,7 @@ class IntakeTest {
         final List<String> calls = new ArrayList<>();
         final List<Long> requested = new ArrayList<>();
         long returned;
+        boolean failGiveBack;
 
         @Override public long reserve(long units) {
             calls.add("reserve");
@@ -58,6 +59,9 @@ class IntakeTest {
 
         @Override public void giveBack(long units) {
             calls.add("giveBack");
+            if (failGiveBack) {
+                throw new IllegalStateException("giveBack failed");
+            }
             returned += units;
         }
     }
@@ -69,11 +73,16 @@ class IntakeTest {
         final List<String> calls;
         int pauses;
         int resumes;
+        int failOnFetch = -1;
+        final List<IncomingRequest> released = new ArrayList<>();
 
         FakeLanes(List<String> calls) { this.calls = calls; }
 
         @Override public List<IncomingRequest> fetch(Map<String, Integer> quotaByLane) {
             calls.add("fetch");
+            if (fetches.size() == failOnFetch) {
+                throw new IllegalStateException("fetch failed");
+            }
             fetches.add(new LinkedHashMap<>(quotaByLane));
             List<IncomingRequest> out = new ArrayList<>();
             quotaByLane.forEach((lane, q) -> {
@@ -90,6 +99,7 @@ class IntakeTest {
             return waiting.values().stream().anyMatch(w -> !w.isEmpty());
         }
 
+        @Override public void release(List<IncomingRequest> requests) { released.addAll(requests); }
         @Override public void pause() { pauses++; }
         @Override public void resume() { resumes++; }
     }
@@ -272,5 +282,27 @@ class IntakeTest {
         assertNull(state.pauseReason());
         assertEquals(1, lanes.resumes);
         assertEquals(4, r.accepted().size(), "never above what the store granted");
+    }
+
+    // AC-05: nothing fetched may be lost when a later sub-round fails; the units go back
+    @Test
+    void failedLaterFetchReleasesWhatWasFetchedAndReturnsAllUnits() {
+        backlog("high", 20);
+        lanes.failOnFetch = 1;
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> intake.intake());
+
+        assertEquals(7, lanes.released.size(), "first sub-round's requests handed back");
+        assertEquals((long) DRAW, store.returned, "every reserved unit returned");
+    }
+
+    @Test
+    void failedGiveBackStillHandsOverTheFetchedRequests() {
+        backlog("high", 3);
+        store.failGiveBack = true;
+
+        IntakeResult r = intake.intake();
+
+        assertEquals(3, r.accepted().size(), "requests already fetched are not dropped");
     }
 }

@@ -238,4 +238,81 @@ class KafkaRequestLanesIT {
             assertFalse(all.isEmpty());
         }
     }
+
+    // AC-08b, AC-09, AC-18: a paused worker that only calls keepAlive() still rejoins after a rebalance
+    @Test
+    void pausedWorkerKeepsItsMembershipThroughARebalanceWithoutConsumingAnything() throws Exception {
+        var env = Env.create(2);
+        var w1 = worker(env, "worker-1-" + env.group(), new Metrics());
+        KafkaRequestLanes w2 = null;
+        try {
+            long end = System.nanoTime() + Duration.ofSeconds(40).toNanos();
+            while (w1.groupMetadata().generationId() <= 0 && System.nanoTime() < end) {
+                w1.awaitAvailable();
+            }
+            assertTrue(w1.groupMetadata().generationId() > 0, "w1 never joined");
+            w1.pause();
+            produce(env.high(), 0, "p0-a");
+            produce(env.high(), 1, "p1-a");
+            w2 = worker(env, "worker-2-" + env.group(), new Metrics());
+            var got = new ArrayList<String>();
+            end = System.nanoTime() + Duration.ofSeconds(40).toNanos();
+            while (got.isEmpty() && System.nanoTime() < end) {
+                w1.keepAlive();
+                w2.fetch(BIG).forEach(r -> got.add(r.correlationId()));
+            }
+            assertFalse(got.isEmpty(), "w2 never received a partition: the paused w1 did not rejoin");
+            w1.resume();
+            end = System.nanoTime() + Duration.ofSeconds(40).toNanos();
+            while (got.size() < 2 && System.nanoTime() < end) {
+                w1.fetch(BIG).forEach(r -> got.add(r.correlationId()));
+                w2.fetch(BIG).forEach(r -> got.add(r.correlationId()));
+            }
+            assertEquals(List.of("p0-a", "p1-a"), got.stream().sorted().toList(), "each record once, none consumed");
+        } finally {
+            w1.close();
+            if (w2 != null) {
+                w2.close();
+            }
+        }
+    }
+
+    // AC-05: released requests are served again, in order, before anything newer
+    @Test
+    void releasedRequestsAreServedAgainInOrder() throws Exception {
+        var env = Env.create(1);
+        produce(env.high(), 0, "r-0", "r-1", "r-2", "r-3", "r-4");
+        try (var w = worker(env, "worker-" + env.group(), new Metrics())) {
+            var first = drain(w, Map.of("high", 2, "low", 0), 2, Duration.ofSeconds(30));
+            assertEquals(2, first.size());
+            w.release(first);
+            var all = drain(w, BIG, 5, Duration.ofSeconds(30));
+            assertEquals(List.of("r-0", "r-1", "r-2", "r-3", "r-4"),
+                    all.stream().map(IncomingRequest::correlationId).toList());
+        }
+    }
+
+    // AC-10b: an idle lane keeps a quota, the busy lane's surplus must not pile up
+    @Test
+    void surplusBufferStaysBoundedWhileOneLaneIsIdle() throws Exception {
+        var env = Env.create(1);
+        var corrs = new String[3000];
+        for (int i = 0; i < corrs.length; i++) {
+            corrs[i] = "s-" + i;
+        }
+        produce(env.high(), 0, corrs);
+        try (var w = worker(env, "worker-" + env.group(), new Metrics())) {
+            int max = 0;
+            long end = System.nanoTime() + Duration.ofSeconds(60).toNanos();
+            int fetched = 0;
+            while (fetched < 300 && System.nanoTime() < end) {
+                if (w.awaitAvailable()) {
+                    fetched += w.fetch(Map.of("high", 5, "low", 5)).size();
+                }
+                max = Math.max(max, w.bufferedCount());
+            }
+            assertTrue(fetched >= 300, "fetched " + fetched);
+            assertTrue(max <= 200, "surplus buffer grew to " + max);
+        }
+    }
 }

@@ -32,7 +32,7 @@
 |---|---|---|
 | F1 | Failing ITs AC-10 / AC-11 | done |
 | F2 | KafkaReplySink A1, A2, B8 | done |
-| F3 | Poll while paused, intake loss, buffer bound (A3, A4, A7) | todo |
+| F3 | Poll while paused, intake loss, buffer bound (A3, A4, A7) | done |
 | F4 | Stall gauge + metrics (A5, B12) | todo |
 | F5 | Graceful stop (A6) | todo |
 | F6 | Startup validation, handler types, docs (B9, B14, B13) | todo |

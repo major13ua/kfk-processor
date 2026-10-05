@@ -36,6 +36,8 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
     static final String REQUEST_KEY = IncomingRequest.REQUEST_KEY;
     /** Synthetic header (epoch millis of the Kafka record), the consistency-lag fallback when created_at is absent. */
     public static final String RECORD_TIMESTAMP = "record_timestamp";
+    /** Upper bound of one poll; with the quota check in {@link #applyPauses} it bounds the surplus buffer. */
+    static final int MAX_POLL_RECORDS = 100;
     private static final Duration POLL_TIMEOUT = Duration.ofMillis(100);
 
     private final KafkaConsumer<byte[], byte[]> consumer;
@@ -60,6 +62,7 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         p.put(ConsumerConfig.GROUP_INSTANCE_ID_CONFIG, properties.getWorkerIdentity());
         p.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, (int) properties.getIdentityWindow().toMillis());
         p.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+        p.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, MAX_POLL_RECORDS);
         p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         p.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
@@ -129,6 +132,11 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         return consumer.groupMetadata();
     }
 
+    /** Polled-but-not-returned requests (surplus over the quotas). */
+    int bufferedCount() {
+        return buffered.size();
+    }
+
     @Override
     public boolean awaitAvailable() {
         if (paused) {
@@ -141,6 +149,30 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
             }
         }
         return !buffered.isEmpty();
+    }
+
+    @Override
+    public void keepAlive() {
+        consumer.pause(consumer.assignment());
+        // partitions assigned by a rebalance inside this poll start unpaused: rewind whatever it returned
+        Map<TopicPartition, Long> rewind = new LinkedHashMap<>();
+        for (ConsumerRecord<byte[], byte[]> record : consumer.poll(Duration.ZERO)) {
+            rewind.putIfAbsent(new TopicPartition(record.topic(), record.partition()), record.offset());
+        }
+        rewind.forEach(consumer::seek);
+        consumer.pause(consumer.assignment());
+    }
+
+    @Override
+    public void release(List<IncomingRequest> requests) {
+        Set<TopicPartition> owned = consumer.assignment();
+        List<IncomingRequest> back = new ArrayList<>();
+        for (IncomingRequest r : requests) {
+            if (owned.contains(new TopicPartition(sourceByLane.get(r.lane()), r.partition()))) {
+                back.add(r);
+            }
+        }
+        buffered.addAll(0, back);
     }
 
     @Override
@@ -168,14 +200,22 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
                 && quotaByLane.entrySet().stream().allMatch(e -> have.getOrDefault(e.getKey(), 0) >= e.getValue());
     }
 
-    /** Pauses partitions of lanes without quota (and all of them while paused) so nothing is fetched and lost. */
+    /**
+     * Pauses partitions of lanes that need nothing: no quota, or the buffer already holds their quota (so the
+     * surplus stays bounded), and all of them while paused. Nothing is fetched and lost.
+     */
     private void applyPauses(Map<String, Integer> quotaByLane) {
+        Map<String, Integer> have = new HashMap<>();
+        for (IncomingRequest r : buffered) {
+            have.merge(r.lane(), 1, Integer::sum);
+        }
         Set<TopicPartition> pause = new HashSet<>();
         Set<TopicPartition> resume = new HashSet<>();
         for (TopicPartition tp : consumer.assignment()) {
             String lane = laneBySource.get(tp.topic());
-            boolean noQuota = quotaByLane.getOrDefault(lane, 0) <= 0;
-            (paused || noQuota ? pause : resume).add(tp);
+            int quota = quotaByLane.getOrDefault(lane, 0);
+            boolean satisfied = quota <= 0 || have.getOrDefault(lane, 0) >= quota;
+            (paused || satisfied ? pause : resume).add(tp);
         }
         consumer.pause(pause);
         consumer.resume(resume);

@@ -62,6 +62,8 @@ class CycleLoopTest {
     private static final class FakeLanes implements RequestLanes {
         final List<IncomingRequest> waiting = new ArrayList<>();
         int fetches;
+        int keepAlives;
+        @Override public void keepAlive() { keepAlives++; }
         @Override public List<IncomingRequest> fetch(Map<String, Integer> quotaByLane) {
             fetches++;
             List<IncomingRequest> out = new ArrayList<>(waiting);
@@ -229,6 +231,32 @@ class CycleLoopTest {
         assertEquals(reservesBefore, store.reserves, "no intake while paused");
         assertEquals(fetchesBefore, lanes.fetches);
         assertEquals(null, state.pauseReason());
+    }
+
+    // AC-08b, AC-09, AC-18: a paused or held worker keeps polling so the member stays in the group
+    @Test
+    void heldAndPausedIterationsKeepThePollLoopAlive() {
+        lanes.waiting.add(reqText("high", "x"));
+        sink.failWith = new ReplyDestinationFault.Unavailable("down", null);
+        CycleLoop<String, String, String> loop = loop(Duration.ofSeconds(5));
+        assertEquals(CycleLoop.Iteration.HELD, loop.runOnce());
+        int afterHold = lanes.keepAlives;
+
+        assertEquals(CycleLoop.Iteration.PAUSED, loop.runOnce());
+        assertEquals(CycleLoop.Iteration.PAUSED, loop.runOnce());
+
+        assertEquals(afterHold + 2, lanes.keepAlives, "every paused iteration polls");
+    }
+
+    @Test
+    void limiterPausedIterationsKeepThePollLoopAlive() {
+        store.down = true;
+        CycleLoop<String, String, String> loop = loop(Duration.ofSeconds(5));
+
+        loop.runOnce();
+        loop.runOnce();
+
+        assertTrue(lanes.keepAlives >= 2, "limiter pause polls, got " + lanes.keepAlives);
     }
 
     @Test

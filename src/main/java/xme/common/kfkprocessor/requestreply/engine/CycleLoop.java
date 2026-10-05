@@ -96,6 +96,11 @@ public final class CycleLoop<K, REQ, RES> {
     }
 
     private Iteration tickPaused() {
+        try {
+            intake.keepAlive();
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.WARNING, "Keep-alive poll failed: " + e.getClass().getName());
+        }
         Optional<CommitResult> out = retry.tick();
         if (out.isPresent()) {
             state.setPendingWork(false);
