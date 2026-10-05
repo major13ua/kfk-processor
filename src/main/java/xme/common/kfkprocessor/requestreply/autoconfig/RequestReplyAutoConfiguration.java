@@ -179,7 +179,8 @@ public class RequestReplyAutoConfiguration {
                 reply -> String.valueOf(reply.data()).getBytes(StandardCharsets.UTF_8),
                 RequestReplyAutoConfiguration::encodeError);
         CommitRetry<K, RES> retry = new CommitRetry<>(committer, probe, state, clock, props.getProbeInterval(),
-                props.getCommitRetryAttempts(), alert, metrics);
+                props.getCommitRetryAttempts(), alert, metrics, intake::keepAlive,
+                r -> intake.revokedSinceFetch(r.request()));
         return new CycleLoop<>(intake, executor, retry, state, metrics, clock, props.effectiveCycleDeadline(),
                 RequestReplyAutoConfiguration::createdAt, MAX_PLAUSIBLE_LAG, props.getProbeInterval(), alert);
     }

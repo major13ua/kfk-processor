@@ -13,6 +13,7 @@ import java.util.function.Function;
 import xme.common.kfkprocessor.requestreply.api.ErrorCategory;
 import xme.common.kfkprocessor.requestreply.api.ErrorReply;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult;
+import xme.common.kfkprocessor.requestreply.ports.GroupMembershipChanged;
 import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
 import xme.common.kfkprocessor.requestreply.ports.LaneAccessDeniedException;
 import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
@@ -119,7 +120,13 @@ public final class CycleLoop<K, REQ, RES> {
             abandon(in, e);
             throw e;
         }
-        Optional<CommitResult> committed = retry.commit(results);
+        Optional<CommitResult> committed;
+        try {
+            committed = retry.commit(results);
+        } catch (GroupMembershipChanged e) {
+            abandon(in, e); // repeated rebalance rejections: serve the requests again
+            throw e;
+        }
         metrics.cycleDuration(Duration.between(start, clock.instant()));
         if (committed.isEmpty()) {
             return Iteration.HELD;

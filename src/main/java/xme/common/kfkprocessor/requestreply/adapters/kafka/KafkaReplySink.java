@@ -27,6 +27,7 @@ import xme.common.kfkprocessor.requestreply.ports.CommitResult;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult.Reason;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult.ReplyFailure;
 import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
+import xme.common.kfkprocessor.requestreply.ports.GroupMembershipChanged;
 import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
 import xme.common.kfkprocessor.requestreply.ports.ReplyRecord;
 import xme.common.kfkprocessor.requestreply.ports.ReplySink;
@@ -253,6 +254,16 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         return false;
     }
 
+    private static boolean membershipChanged(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof org.apache.kafka.clients.consumer.CommitFailedException
+                    || t instanceof org.apache.kafka.common.errors.FencedInstanceIdException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static List<String> cycleId(List<ReplyRecord> replies) {
         List<String> id = new ArrayList<>(replies.size());
         for (ReplyRecord r : replies) {
@@ -458,6 +469,9 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
 
     /** Destination faults become typed faults; everything else (fenced, commit failure) propagates untyped. */
     private RuntimeException translate(RuntimeException e) {
+        if (membershipChanged(e)) {
+            return new GroupMembershipChanged("consumer group membership changed; Cycle not committed", e);
+        }
         if (isFenced(e)) {
             return new ReplyDestinationFault.Fenced("fenced by a newer instance with the same transactional id", e);
         }

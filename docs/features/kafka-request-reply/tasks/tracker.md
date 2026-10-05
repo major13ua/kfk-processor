@@ -61,7 +61,7 @@
 |---|---|---|
 | F20 | InvalidTopicException is a destination fault, Topic.validate at startup, probe refuses; probe maps TLS/SASL auth failure to permission-denied (B1, B4) | done |
 | F21 | Unexpected RuntimeException between intake and commit never loses accepted requests (B2) | done |
-| F22 | Typed 'membership changed' commit failure: keep-alive poll, dropHeld, no false destination alert (B3) | todo |
+| F22 | Typed 'membership changed' commit failure: keep-alive poll, dropHeld, no false destination alert (B3) | done |
 | F23 | Dropped-reply alert has non-pause kind; Consistency Lag skips keyed by lane:partition:position; engine test gaps (Group C engine, Group D code) | todo |
 | F24 | Close review r3 Group C test gaps (AC-19 degraded IT, multi-partition ITs, autoconfig codes, mid-batch reject, lifecycle waits) | todo |
 | F25 | Docs and spec: AC-08b amendment, section 8 items, guide/test-plan/contracts corrections (r3 Group A spec change, Group D docs) | todo |

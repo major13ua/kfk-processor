@@ -25,6 +25,7 @@ import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.Test;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult.Reason;
+import xme.common.kfkprocessor.requestreply.ports.GroupMembershipChanged;
 import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
 import xme.common.kfkprocessor.requestreply.ports.ReplyRecord;
 
@@ -390,6 +391,44 @@ class KafkaReplySinkTest {
         p.commitTransactionException = new org.apache.kafka.common.errors.TransactionalIdAuthorizationException("tx");
         assertThrows(ReplyDestinationFault.PermissionDenied.class,
                 () -> sink(p).commit(List.of(reply("high", 0, 1, "c-1", b("a")))));
+    }
+
+    // review r3 B3 / AC-08b, AC-17: a rebalance-rejected commit is typed "membership changed", not destination, not untyped
+    private void assertMembershipChanged(RuntimeException kafka, boolean atOffsets) {
+        var p = new MockProducer<byte[], byte[]>(true, null, new ByteArraySerializer(), new ByteArraySerializer()) {
+            @Override
+            public synchronized void sendOffsetsToTransaction(Map<TopicPartition, OffsetAndMetadata> offsets,
+                    ConsumerGroupMetadata metadata) {
+                if (atOffsets) {
+                    throw kafka;
+                }
+                super.sendOffsetsToTransaction(offsets, metadata);
+            }
+        };
+        if (!atOffsets) {
+            p.commitTransactionException = kafka;
+        }
+        RuntimeException thrown = assertThrows(RuntimeException.class,
+                () -> sink(p).commit(List.of(reply("high", 0, 1, "c-1", b("a")))));
+        assertTrue(thrown instanceof GroupMembershipChanged, "was " + thrown);
+        assertFalse(thrown instanceof ReplyDestinationFault);
+        assertEquals(kafka, thrown.getCause());
+        assertFalse(p.transactionCommitted());
+    }
+
+    @Test
+    void commitFailedExceptionAtOffsetsIsMembershipChanged() {
+        assertMembershipChanged(new org.apache.kafka.clients.consumer.CommitFailedException(), true);
+    }
+
+    @Test
+    void fencedInstanceIdAtOffsetsIsMembershipChanged() {
+        assertMembershipChanged(new org.apache.kafka.common.errors.FencedInstanceIdException("static member fenced"), true);
+    }
+
+    @Test
+    void commitFailedExceptionAtCommitIsMembershipChanged() {
+        assertMembershipChanged(new org.apache.kafka.clients.consumer.CommitFailedException(), false);
     }
 
     // AC-09 (review B10): security settings reach the producer

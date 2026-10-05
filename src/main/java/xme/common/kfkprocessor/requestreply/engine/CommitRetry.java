@@ -6,8 +6,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult;
 import xme.common.kfkprocessor.requestreply.ports.DestinationProbe;
+import xme.common.kfkprocessor.requestreply.ports.GroupMembershipChanged;
 import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
 import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
 
@@ -37,6 +39,8 @@ public final class CommitRetry<K, RES> {
     private final int attempts;
     private final Consumer<Alert> alert;
     private final WorkerMetrics metrics;
+    private final Runnable keepAlive;
+    private final Predicate<HandlerResult<K, RES>> revokedSinceFetch;
     private List<HandlerResult<K, RES>> held;
     private WorkerState.PauseReason heldReason;
     private Instant lastProbe;
@@ -48,6 +52,14 @@ public final class CommitRetry<K, RES> {
 
     public CommitRetry(CycleCommitter<K, RES> committer, DestinationProbe probe, WorkerState state, Clock clock,
             Duration probeInterval, int attempts, Consumer<Alert> alert, WorkerMetrics metrics) {
+        this(committer, probe, state, clock, probeInterval, attempts, alert, metrics, null, null);
+    }
+
+    public CommitRetry(CycleCommitter<K, RES> committer, DestinationProbe probe, WorkerState state, Clock clock,
+            Duration probeInterval, int attempts, Consumer<Alert> alert, WorkerMetrics metrics, Runnable keepAlive,
+            Predicate<HandlerResult<K, RES>> revokedSinceFetch) {
+        this.keepAlive = keepAlive;
+        this.revokedSinceFetch = revokedSinceFetch;
         this.metrics = metrics;
         this.committer = committer;
         this.probe = probe;
@@ -66,6 +78,18 @@ public final class CommitRetry<K, RES> {
                 CommitResult out = committer.commit(results);
                 state.commitSucceeded();
                 return Optional.of(out);
+            } catch (GroupMembershipChanged ex) {
+                abandonIfInterrupted(ex);
+                if (keepAlive == null || revokedSinceFetch == null || i == attempts - 1) {
+                    // repeated rebalances: not a destination fault, so no pause or unavailable alert; the loop hands
+                    // the requests back and alerts like any unexpected Cycle failure
+                    throw ex;
+                }
+                keepAlive.run(); // lets the rebalance complete so the revoked partitions are known
+                results = results.stream().filter(revokedSinceFetch.negate()).toList();
+                if (results.isEmpty()) {
+                    return Optional.of(new CommitResult(List.of()));
+                }
             } catch (ReplyDestinationFault fault) {
                 abandonIfInterrupted(fault);
                 hold(results, fault);
@@ -137,6 +161,12 @@ public final class CommitRetry<K, RES> {
         } catch (ReplyDestinationFault fault) {
             abandonIfInterrupted(fault);
             moveReason(reasonOf(fault));
+        } catch (GroupMembershipChanged ex) {
+            abandonIfInterrupted(ex);
+            // the rebalance already ran in CycleLoop.tickPaused's keep-alive: drop what it revoked, probe again later
+            if (revokedSinceFetch != null) {
+                dropHeld(revokedSinceFetch);
+            }
         } catch (RuntimeException ex) {
             abandonIfInterrupted(ex);
             // still failing: keep holding under the current reason

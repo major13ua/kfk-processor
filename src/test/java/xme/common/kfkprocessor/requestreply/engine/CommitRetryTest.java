@@ -24,6 +24,7 @@ import xme.common.kfkprocessor.requestreply.engine.WorkerState.PauseReason;
 import xme.common.kfkprocessor.requestreply.engine.WorkerState.Status;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult;
 import xme.common.kfkprocessor.requestreply.ports.DestinationProbe;
+import xme.common.kfkprocessor.requestreply.ports.GroupMembershipChanged;
 import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
 import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
 import xme.common.kfkprocessor.requestreply.ports.ReplyRecord;
@@ -308,5 +309,79 @@ class CommitRetryTest {
 
         assertEquals(PauseReason.PERMISSION, state.pauseReason());
         assertTrue(retry.holding());
+    }
+
+    // review r3 B3 / AC-08b, AC-17: a commit rejected by a group rebalance is not a destination fault.
+    // Proposed: ports.GroupMembershipChanged (RuntimeException, NOT a ReplyDestinationFault) thrown by the sink, and
+    // CommitRetry constructor (..., alert, metrics, Runnable keepAlive, Predicate<HandlerResult<K, RES>> revokedSinceFetch).
+    private final AtomicInteger keepAlives = new AtomicInteger();
+    private final java.util.Set<Integer> revokedPartitions = new java.util.HashSet<>();
+
+    private void withMembershipHooks() {
+        CycleCommitter<String, String> committer = new CycleCommitter<>(sink,
+                r -> ("reply|" + r.correlationId()).getBytes(StandardCharsets.UTF_8),
+                e -> ("error|" + e.correlationId()).getBytes(StandardCharsets.UTF_8));
+        retry = new CommitRetry<>(committer, probe, state, clock, PROBE_EVERY, ATTEMPTS, alerts::add, null,
+                keepAlives::incrementAndGet, r -> revokedPartitions.contains(r.request().partition()));
+    }
+
+    private List<HandlerResult<String, String>> twoPartitionCycle() {
+        handlerCalls.incrementAndGet();
+        IncomingRequest a = new IncomingRequest("high", 0, 7, "key-c1", "c1", java.util.Map.of(),
+                "p".getBytes(StandardCharsets.UTF_8));
+        IncomingRequest b = new IncomingRequest("high", 1, 3, "key-c2", "c2", java.util.Map.of(),
+                "p".getBytes(StandardCharsets.UTF_8));
+        return List.of(new HandlerResult<>(a, new Reply<>("c1", "key-c1", "r1"), null),
+                new HandlerResult<>(b, new Reply<>("c2", "key-c2", "r2"), null));
+    }
+
+    @Test
+    void membershipChangedDoesAKeepAlivePollThenRetriesWithoutProbeAlertOrPause() {
+        withMembershipHooks();
+        sink.failures.add(new GroupMembershipChanged("rebalanced", null));
+
+        Optional<CommitResult> out = retry.commit(cycle());
+
+        assertTrue(out.isPresent(), "retried and committed");
+        assertEquals(1, keepAlives.get(), "one keep-alive poll between the rejected commit and the retry");
+        assertEquals(2, sink.calls.size());
+        assertSameResults();
+        assertEquals(0, probe.calls, "no probe gate");
+        assertTrue(alerts.isEmpty(), "no reply_destination.unavailable alert");
+        assertNull(state.pauseReason());
+        assertFalse(retry.holding());
+        assertEquals(1, handlerCalls.get(), "no Handler re-run");
+    }
+
+    @Test
+    void membershipChangedDropsResultsOfRevokedPartitionsAndRecommitsTheRest() {
+        withMembershipHooks();
+        sink.failures.add(new GroupMembershipChanged("rebalanced", null));
+        revokedPartitions.add(0);
+
+        assertTrue(retry.commit(twoPartitionCycle()).isPresent());
+
+        assertEquals(2, sink.calls.size());
+        assertEquals(2, sink.calls.get(0).size());
+        assertEquals(1, sink.calls.get(1).size(), "revoked partition 0 dropped");
+        assertEquals("c2", sink.calls.get(1).get(0).correlationId());
+        assertTrue(alerts.isEmpty());
+        assertNull(state.pauseReason());
+    }
+
+    @Test
+    void membershipChangedWithEverythingRevokedCommitsNothingAndDoesNotPause() {
+        withMembershipHooks();
+        sink.failures.add(new GroupMembershipChanged("rebalanced", null));
+        revokedPartitions.add(0);
+
+        Optional<CommitResult> out = retry.commit(cycle());
+
+        assertTrue(out.isPresent(), "nothing left to commit is not a hold");
+        assertTrue(out.get().failures().isEmpty());
+        assertEquals(1, sink.calls.size(), "no second commit of revoked requests");
+        assertTrue(alerts.isEmpty());
+        assertNull(state.pauseReason());
+        assertFalse(retry.holding());
     }
 }
