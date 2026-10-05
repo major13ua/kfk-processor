@@ -38,6 +38,7 @@ public interface CancellationSignal {
 ```
 
 Rules:
+- `K`, `REQ` and `RES` must be `String`: the starter passes the Request Key and payload as UTF-8 text and writes the reply with `String.valueOf`. A Handler bean whose generics resolve to any other type is refused at startup (`handler_types_unsupported`); a lambda whose generics cannot be resolved is not checked. A codec SPI is out of scope.
 - Exactly one `RequestReplyHandler` bean per worker; none or several: startup refuses (`request_reply.config.handler_missing`, AC-02).
 - Handlers are at-least-once. Dedupe on `idempotencyKey` for repeat executions; it identifies the attempt, not the business operation (spec §6.1).
 - The worker never re-runs a failed or timed-out Handler (AC-07b, AC-08).
@@ -91,6 +92,14 @@ Startup validation (flow 4) fails with a plain-language message naming the confl
 | `request_reply.config.cycle_deadline_exceeds_commit_window_share` | deadline above 80% of the commit window |
 | `request_reply.config.weight_not_positive` | lane weight ≤ 0 |
 | `request_reply.config.identity_missing` | no explicit worker identity |
+| `request_reply.config.reply_destination_missing` | `reply-destination` blank |
+| `request_reply.config.rate_budget_not_positive` | `rate-budget-per-second` ≤ 0 |
+| `request_reply.config.draw_per_round_not_positive` | `draw-per-round` ≤ 0 |
+| `request_reply.config.lanes_missing` | no lane configured |
+| `request_reply.config.lane_incomplete` | a lane without name or source |
+| `request_reply.config.lane_name_duplicate` | two lanes with the same name |
+| `request_reply.config.lane_source_duplicate` | two lanes reading the same source |
+| `request_reply.config.handler_types_unsupported` | Handler `K`, `REQ` or `RES` resolves to a type other than `String` |
 
 Runtime faults (no exception to the Handler; state and metrics instead): `request_reply.reply_destination.permission_denied` (AC-09), `request_reply.reply_destination.unavailable` (AC-08b), `request_reply.rate_budget_store.unavailable` (AC-18).
 

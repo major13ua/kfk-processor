@@ -21,6 +21,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.DependsOn;
+import org.springframework.core.ResolvableType;
 import org.springframework.core.env.Environment;
 import xme.common.kfkprocessor.requestreply.adapters.allowance.Bucket4jBudgetCounters;
 import xme.common.kfkprocessor.requestreply.adapters.allowance.RedisAllowanceStore;
@@ -65,8 +66,13 @@ public class RequestReplyAutoConfiguration {
     @Bean(CHECK)
     static ConfigurationCheck requestReplyConfigurationCheck(RequestReplyProperties props,
             ConfigurableListableBeanFactory beanFactory) {
-        int handlers = beanFactory.getBeanNamesForType(RequestReplyHandler.class).length;
-        new StartupValidator(msg -> LOG.log(System.Logger.Level.INFO, msg)).validate(props, handlers);
+        String[] handlerNames = beanFactory.getBeanNamesForType(RequestReplyHandler.class);
+        StartupValidator validator = new StartupValidator(msg -> LOG.log(System.Logger.Level.INFO, msg));
+        validator.validate(props, handlerNames.length);
+        ResolvableType handlerType = beanFactory.getMergedBeanDefinition(handlerNames[0]).getResolvableType()
+                .as(RequestReplyHandler.class);
+        validator.validateHandlerTypes(handlerType.getGeneric(0).resolve(), handlerType.getGeneric(1).resolve(),
+                handlerType.getGeneric(2).resolve());
         return new ConfigurationCheck();
     }
 

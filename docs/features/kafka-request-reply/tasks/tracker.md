@@ -35,7 +35,7 @@
 | F3 | Poll while paused, intake loss, buffer bound (A3, A4, A7) | done |
 | F4 | Stall gauge + metrics (A5, B12) | done |
 | F5 | Graceful stop (A6) | done |
-| F6 | Startup validation, handler types, docs (B9, B14, B13) | todo |
+| F6 | Startup validation, handler types, docs (B9, B14, B13) | done |
 | F7 | Probe (B10) | todo |
 | F8 | Per-lane key chains (B11) | todo |
 | F9 | Test gaps (Group D) | todo |

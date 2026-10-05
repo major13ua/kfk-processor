@@ -15,6 +15,7 @@ Wire contract between Requesters and the worker, derived from `sad.md` §6 flows
 - **Producer:** Requester. **Consumer:** every worker of the group, partitions spread across workers (ADR-0004).
 - **Delivery:** at-least-once to the Handler; replies exactly-once as seen by committed-only readers (ADR-0002).
 - **Ordering:** by Request Key within a lane only. Requesters must send same-key requests to one lane (SAD §11).
+- **Kafka record key = `request_key`:** the worker orders by the `request_key` header, but Kafka only keeps records in order within a partition, and the partition is chosen from the Kafka **record key**. Requesters must set the Kafka record key to the same value as `request_key`; otherwise same-key requests can land on different partitions and be consumed by different workers, and per-key order is lost (AC-07c). The worker does not check this.
 
 ### Event: `request_reply.request.v1`
 

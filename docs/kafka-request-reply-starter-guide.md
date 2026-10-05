@@ -27,7 +27,7 @@ class MyHandler implements RequestReplyHandler<String, String, String> {
 ```
 
 - Exactly one `RequestReplyHandler` bean per worker. None or several: startup refuses (`request_reply.config.handler_missing`).
-- In the current auto-configuration the request payload is decoded as a UTF-8 `String` and the reply body is `String.valueOf(result)` encoded as UTF-8. Handle serialization of structured data yourself.
+- In the current auto-configuration the request payload is decoded as a UTF-8 `String` and the reply body is `String.valueOf(result)` encoded as UTF-8. Handle serialization of structured data yourself. Declare all three generics as `String`: a Handler bean resolving to any other type is refused at startup (`request_reply.config.handler_types_unsupported`); there is no codec SPI.
 - `RequestContext` gives: `requestKey`, `correlationId`, `idempotencyKey`, `lane`, read-only `headers` (includes a synthetic `record_timestamp`, epoch millis), `cancellation`.
 - Throwing any exception produces an Error Reply with category `failure`. The exception text is never sent to the Requester, and payload content is never logged by the starter.
 - Same Request Key in one lane: Handlers run one after another in arrival order. Different keys run in parallel on virtual threads. Order across lanes is not guaranteed.
@@ -47,6 +47,7 @@ class MyHandler implements RequestReplyHandler<String, String, String> {
 
 1. **Read committed replies only.** Set the consumer `isolation.level=read_committed`. Replies are written inside the Cycle transaction, so a reader that sees uncommitted data may see replies of abandoned commits. A stuck commit delays replies for everyone up to the commit window (60 s, provisional).
 2. **Send same-key requests to one lane.** Ordering is guaranteed per Request Key within a lane only. A low-share lane can deliver an older request in a later Cycle than a newer one on another lane.
+   **Set the Kafka record key to the `request_key` value.** Kafka keeps order only inside one partition and picks the partition from the record key, not from the `request_key` header. If the record key differs, same-key requests can sit on different partitions and run on different workers in any order. The worker does not check this.
 3. **Send the required fields.** Currently as Kafka record headers (open, OQ-1, may move to the body):
    - `correlation_id` (required, opaque, set by the Requester)
    - `request_key` (required)

@@ -64,6 +64,14 @@ class RequestReplyAutoConfigurationTest {
     }
 
     @Configuration(proxyBeanMethods = false)
+    static class NonStringHandlerConfig {
+        @Bean
+        RequestReplyHandler<Long, Integer, Integer> handler() {
+            return (ctx, req) -> req;
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
     static class PortsConfig {
         @Bean RequestLanes lanes() { return LANES; }
         @Bean ReplySink sink() { return SINK; }
@@ -135,6 +143,17 @@ class RequestReplyAutoConfigurationTest {
                             .isInstanceOfSatisfying(ConfigurationRefusedException.class,
                                     e -> assertThat(e.code()).isEqualTo("request_reply.config.handler_missing"));
                 });
+    }
+
+    // B14: Handler generic types other than String are refused at startup
+    @Test
+    void handlerWithNonStringTypesRefusesStart() {
+        runner().withUserConfiguration(NonStringHandlerConfig.class, PortsConfig.class).run(ctx -> {
+            assertThat(ctx).hasFailed();
+            assertThat(rootCause(ctx.getStartupFailure()))
+                    .isInstanceOfSatisfying(ConfigurationRefusedException.class,
+                            e -> assertThat(e.code()).isEqualTo("request_reply.config.handler_types_unsupported"));
+        });
     }
 
     // AC-15 via T3: identity is explicit

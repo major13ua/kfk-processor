@@ -143,4 +143,100 @@ class StartupValidatorTest {
         assertTrue(all.contains("tiny") && all.contains("5"), all);
         assertTrue(all.contains("big") && all.contains("95"), all);
     }
+
+    // AC-02 / B9: missing rules
+    @Test
+    void missingReplyDestinationIsRefused() {
+        RequestReplyProperties p = valid();
+        p.setReplyDestination(" ");
+        assertEquals("request_reply.config.reply_destination_missing", refused(p, 1).code());
+        p.setReplyDestination(null);
+        assertEquals("request_reply.config.reply_destination_missing", refused(p, 1).code());
+    }
+
+    @Test
+    void rateBudgetNotPositiveIsRefused() {
+        RequestReplyProperties p = valid();
+        p.setRateBudgetPerSecond(0);
+        assertEquals("request_reply.config.rate_budget_not_positive", refused(p, 1).code());
+        p.setRateBudgetPerSecond(-5);
+        assertEquals("request_reply.config.rate_budget_not_positive", refused(p, 1).code());
+    }
+
+    @Test
+    void noLanesIsRefused() {
+        RequestReplyProperties p = valid();
+        p.setLanes(List.of());
+        assertEquals("request_reply.config.lanes_missing", refused(p, 1).code());
+    }
+
+    @Test
+    void duplicateLaneNamesAreRefusedNamingTheName() {
+        RequestReplyProperties p = valid();
+        RequestReplyProperties.Lane dup = lane("a", 1);
+        dup.setSource("other-topic");
+        p.setLanes(List.of(lane("a", 5), dup));
+        ConfigurationRefusedException e = refused(p, 1);
+        assertEquals("request_reply.config.lane_name_duplicate", e.code());
+        assertTrue(e.getMessage().contains("'a'"), e.getMessage());
+    }
+
+    @Test
+    void duplicateLaneSourcesAreRefusedNamingTheSource() {
+        RequestReplyProperties p = valid();
+        RequestReplyProperties.Lane dup = lane("b", 1);
+        dup.setSource("a-topic");
+        p.setLanes(List.of(lane("a", 5), dup));
+        ConfigurationRefusedException e = refused(p, 1);
+        assertEquals("request_reply.config.lane_source_duplicate", e.code());
+        assertTrue(e.getMessage().contains("a-topic"), e.getMessage());
+    }
+
+    @Test
+    void laneWithoutNameOrSourceIsRefused() {
+        RequestReplyProperties p = valid();
+        RequestReplyProperties.Lane noName = lane("x", 1);
+        noName.setName(null);
+        p.setLanes(List.of(noName));
+        assertEquals("request_reply.config.lane_incomplete", refused(p, 1).code());
+        RequestReplyProperties.Lane noSource = lane("x", 1);
+        noSource.setSource("");
+        p.setLanes(List.of(noSource));
+        assertEquals("request_reply.config.lane_incomplete", refused(p, 1).code());
+    }
+
+    @Test
+    void drawPerRoundNotPositiveIsRefused() {
+        RequestReplyProperties p = valid();
+        p.setDrawPerRound(0);
+        assertEquals("request_reply.config.draw_per_round_not_positive", refused(p, 1).code());
+    }
+
+    // B9: toSeconds() truncation made "1s does not fit inside 1s"
+    @Test
+    void subSecondConflictIsReportedWithoutTruncation() {
+        RequestReplyProperties p = valid();
+        p.setHandlerTimeout(Duration.ofMillis(1500));
+        p.setCycleDeadline(Duration.ofMillis(1200));
+        p.setCommitWindow(Duration.ofSeconds(2));
+        ConfigurationRefusedException e = refused(p, 1);
+        assertEquals("request_reply.config.timeout_exceeds_cycle_deadline", e.code());
+        assertTrue(e.getMessage().contains("1500ms") && e.getMessage().contains("1200ms"), e.getMessage());
+    }
+
+    // B14: Handler generic types are fixed to String
+    @Test
+    void handlerWithNonStringTypesIsRefused() {
+        ConfigurationRefusedException e = assertThrows(ConfigurationRefusedException.class,
+                () -> validator.validateHandlerTypes(Long.class, Integer.class, String.class));
+        assertEquals("request_reply.config.handler_types_unsupported", e.code());
+        assertTrue(e.getMessage().contains("Long") && e.getMessage().contains("Integer"), e.getMessage());
+    }
+
+    @Test
+    void handlerWithStringOrUnresolvableTypesIsAccepted() {
+        assertDoesNotThrow(() -> validator.validateHandlerTypes(String.class, String.class, String.class));
+        assertDoesNotThrow(() -> validator.validateHandlerTypes(null, null, null));
+        assertDoesNotThrow(() -> validator.validateHandlerTypes(Object.class, Object.class, Object.class));
+    }
 }
