@@ -38,10 +38,22 @@ class KafkaReplySinkTest {
     private static final String REPLIES = "replies";
     private static final Map<String, String> SOURCES = Map.of("high", "src-high", "low", "src-low");
 
-    /** MockProducer whose sends can fail per record, through the callback or synchronously. */
+    /**
+     * MockProducer whose sends can fail per record, through the callback or synchronously. With {@code batched} it
+     * models the real client (Sender.failBatch, KIP-467): records sent in a transaction form one batch, resolved on
+     * flush; when the batch has a rejected record, that record fails with the exception of {@code fault} and every
+     * other record of the batch with a generic KafkaException ("part of a batch which had one more more invalid
+     * records"). A batch without a faulty record is delivered.
+     */
     private static final class Producer extends MockProducer<byte[], byte[]> {
+        static final String SIBLING_MESSAGE =
+                "The request included a record that is part of a batch which had one more more invalid records";
+
         Function<ProducerRecord<byte[], byte[]>, RuntimeException> fault = r -> null;
         boolean viaCallback = true;
+        boolean batched = false;
+        private final java.util.List<ProducerRecord<byte[], byte[]>> batch = new java.util.ArrayList<>();
+        private final java.util.List<Callback> batchCallbacks = new java.util.ArrayList<>();
 
         Producer() {
             super(true, null, new ByteArraySerializer(), new ByteArraySerializer());
@@ -49,6 +61,11 @@ class KafkaReplySinkTest {
 
         @Override
         public synchronized Future<RecordMetadata> send(ProducerRecord<byte[], byte[]> record, Callback callback) {
+            if (batched) {
+                batch.add(record);
+                batchCallbacks.add(callback);
+                return CompletableFuture.completedFuture(null);
+            }
             RuntimeException f = fault.apply(record);
             if (f == null) {
                 return super.send(record, callback);
@@ -60,6 +77,46 @@ class KafkaReplySinkTest {
                 callback.onCompletion(null, f);
             }
             return CompletableFuture.failedFuture(f);
+        }
+
+        @Override
+        public synchronized void flush() {
+            if (batched) {
+                resolveBatch();
+            }
+            super.flush();
+        }
+
+        private void resolveBatch() {
+            var records = new java.util.ArrayList<>(batch);
+            var callbacks = new java.util.ArrayList<>(batchCallbacks);
+            batch.clear();
+            batchCallbacks.clear();
+            boolean anyRejected = records.stream().anyMatch(r -> fault.apply(r) != null);
+            for (int i = 0; i < records.size(); i++) {
+                RuntimeException f = fault.apply(records.get(i));
+                if (!anyRejected) {
+                    super.send(records.get(i), callbacks.get(i));
+                } else if (callbacks.get(i) != null) {
+                    callbacks.get(i).onCompletion(null,
+                            f != null ? f : new org.apache.kafka.common.KafkaException(SIBLING_MESSAGE));
+                }
+            }
+        }
+
+        @Override
+        public synchronized void commitTransaction() {
+            if (batched) {
+                resolveBatch();
+            }
+            super.commitTransaction();
+        }
+
+        @Override
+        public synchronized void abortTransaction() {
+            batch.clear();
+            batchCallbacks.clear();
+            super.abortTransaction();
         }
     }
 
@@ -453,12 +510,18 @@ class KafkaReplySinkTest {
                 new org.apache.kafka.clients.consumer.CommitFailedException()), true);
     }
 
-    // review r4 S5: a per-record broker validation failure (INVALID_RECORD) in the middle of a batch is a per-reply
-    // failure: that reply moves to its fallback, the others are delivered, nothing is thrown as a destination fault
+    private static String text(ProducerRecord<byte[], byte[]> r) {
+        return new String(r.value(), StandardCharsets.UTF_8);
+    }
+
+    // review r4 S5 / r5 R2, F31: the real producer reports the rejected record as InvalidRecordException and every
+    // other record of its batch as a generic KafkaException. Only the rejected reply is demoted; the collateral
+    // siblings are resent with their primary values, committed, no destination fault.
     @Test
-    void invalidRecordOnOneReplyMidBatchDemotesOnlyThatReply() {
+    void invalidRecordOnOneReplyMidBatchDemotesOnlyThatReplyAndSiblingsAreCommittedWithPrimaryValues() {
         var p = new Producer();
-        p.fault = r -> new String(r.value(), StandardCharsets.UTF_8).equals("bad")
+        p.batched = true;
+        p.fault = r -> text(r).equals("bad")
                 ? new org.apache.kafka.common.InvalidRecordException("Compacted topic cannot accept message without key")
                 : null;
         CommitResult r = sink(p).commit(List.of(
@@ -467,8 +530,72 @@ class KafkaReplySinkTest {
                 reply("high", 0, 2, "c-2", b("c"))));
         assertEquals(1, r.failures().size());
         assertEquals("c-1", r.failures().get(0).correlationId());
+        assertEquals(Reason.REJECTED, r.failures().get(0).reason());
         assertTrue(r.failures().get(0).substituted());
         assertTrue(p.transactionCommitted());
+        assertEquals(List.of("c-0=a", "c-1=undeliverable", "c-2=c"),
+                p.history().stream().map(h -> corr(h) + "=" + text(h)).toList());
+        assertEquals(3L, p.consumerGroupOffsetsHistory().get(0).get("grp").get(new TopicPartition("src-high", 0)).offset());
+    }
+
+    // same, rejected reply first (the lowest index is the rejected one) and last (siblings all have lower index)
+    @Test
+    void invalidRecordOnTheLastReplyOfABatchDemotesOnlyThatReply() {
+        var p = new Producer();
+        p.batched = true;
+        p.fault = r -> text(r).equals("bad") ? new org.apache.kafka.common.InvalidRecordException("rejected") : null;
+        CommitResult r = sink(p).commit(List.of(
+                reply("high", 0, 0, "c-0", b("a")),
+                reply("high", 0, 1, "c-1", b("b")),
+                new ReplyRecord("high", 0, 2, "c-2", "key-c-2", b("bad"), false, b("undeliverable"))));
+        assertEquals(List.of("c-2"), r.failures().stream().map(CommitResult.ReplyFailure::correlationId).toList());
+        assertEquals(Reason.REJECTED, r.failures().get(0).reason());
+        assertEquals(List.of("c-0=a", "c-1=b", "c-2=undeliverable"),
+                p.history().stream().map(h -> corr(h) + "=" + text(h)).toList());
+        assertTrue(p.transactionCommitted());
+    }
+
+    // a single reply rejected with InvalidRecordException and an accepted fallback still demotes per reply
+    @Test
+    void singleInvalidRecordReplyWithAcceptedFallbackIsStillDemotedPerReply() {
+        var p = new Producer();
+        p.batched = true;
+        p.fault = r -> text(r).equals("bad") ? new org.apache.kafka.common.InvalidRecordException("rejected") : null;
+        CommitResult r = sink(p).commit(List.of(
+                new ReplyRecord("high", 0, 0, "c-0", "key-c-0", b("bad"), false, b("undeliverable"))));
+        assertEquals(1, r.failures().size());
+        assertEquals(Reason.REJECTED, r.failures().get(0).reason());
+        assertTrue(r.failures().get(0).substituted());
+        assertEquals(List.of("undeliverable"), p.history().stream().map(KafkaReplySinkTest::text).toList());
+        assertTrue(p.transactionCommitted());
+    }
+
+    // review r5 R4, F31: every reply of the round rejected with InvalidRecordException (primary and fallback) is a
+    // destination-wide cause: destination fault, nothing dropped, nothing committed
+    @Test
+    void roundWhereEveryReplyIsInvalidRecordRejectedIsADestinationFaultAndNothingCommits() {
+        var p = new Producer();
+        p.batched = true;
+        p.fault = r -> new org.apache.kafka.common.InvalidRecordException("Timestamp 1 of message is out of bounds");
+        assertThrows(ReplyDestinationFault.Unavailable.class, () -> sink(p).commit(List.of(
+                withFallback("high", 0, 0, "c-0", b("a"), b("undeliverable-0")),
+                withFallback("high", 0, 1, "c-1", b("b"), b("undeliverable-1")),
+                withFallback("high", 0, 2, "c-2", b("c"), b("undeliverable-2")))));
+        assertFalse(p.transactionCommitted());
+        assertTrue(p.consumerGroupOffsetsHistory().isEmpty());
+        assertTrue(p.history().isEmpty());
+    }
+
+    // same, where the rejection is per record (not batch-wise) and the fallbacks are rejected too
+    @Test
+    void roundWhereEveryReplyAndEveryFallbackIsInvalidRecordRejectedThrowsEvenWithoutBatchSemantics() {
+        var p = new Producer();
+        p.fault = r -> new org.apache.kafka.common.InvalidRecordException("rejected");
+        assertThrows(ReplyDestinationFault.Unavailable.class, () -> sink(p).commit(List.of(
+                withFallback("high", 0, 0, "c-0", b("a"), b("undeliverable-0")),
+                withFallback("high", 0, 1, "c-1", b("b"), b("undeliverable-1")))));
+        assertFalse(p.transactionCommitted());
+        assertTrue(p.consumerGroupOffsetsHistory().isEmpty());
     }
 
     // AC-09 (review B10): security settings reach the producer

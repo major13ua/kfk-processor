@@ -292,7 +292,10 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
                 p.flush();
                 int rejected = firstFailed(async);
                 if (rejected >= 0) {
-                    // the sends after it fail with the same exception as collateral: only the first is demoted
+                    if (destinationWideRejection(async, stage)) {
+                        throw destinationFault(async.get(rejected));
+                    }
+                    // the siblings of a rejected record fail as collateral: only the first true failure is demoted
                     demote(rejected, async.get(rejected), stage, first, replies);
                     restart = true;
                 }
@@ -368,14 +371,50 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         return firstFailed(async) >= 0;
     }
 
-    /** Index of the lowest reply whose send failed in the round, or -1. */
+    /**
+     * Index of the lowest reply whose send failed in the round, or -1. A failure that is only collateral of a
+     * rejected sibling in the same batch is skipped when a true per-reply failure exists.
+     */
     private static int firstFailed(AtomicReferenceArray<Exception> async) {
+        int firstAny = -1;
         for (int i = 0; i < async.length(); i++) {
-            if (async.get(i) != null) {
+            Exception e = async.get(i);
+            if (e == null) {
+                continue;
+            }
+            if (!isCollateral(e)) {
                 return i;
             }
+            if (firstAny < 0) {
+                firstAny = i;
+            }
         }
-        return -1;
+        return firstAny;
+    }
+
+    /** The generic error the client gives the other records of a batch that had an invalid record (KIP-467). */
+    private static boolean isCollateral(Exception e) {
+        return e.getClass() == org.apache.kafka.common.KafkaException.class
+                && e.getCause() == null
+                && e.getMessage() != null && e.getMessage().contains("invalid records");
+    }
+
+    /**
+     * True when every reply sent in the round was rejected as an invalid record and at least one of them was
+     * already on its fallback: the cause is the destination (e.g. a compacted topic, timestamp bounds), not a reply.
+     */
+    private static boolean destinationWideRejection(AtomicReferenceArray<Exception> async, int[] stage) {
+        boolean onFallback = false;
+        for (int i = 0; i < async.length(); i++) {
+            if (stage[i] >= DROPPED) {
+                continue;
+            }
+            if (!(async.get(i) instanceof org.apache.kafka.common.InvalidRecordException)) {
+                return false;
+            }
+            onFallback |= stage[i] == FALLBACK;
+        }
+        return onFallback;
     }
 
     /** Moves reply {@code i} to its next stage; a destination fault is thrown instead. */
