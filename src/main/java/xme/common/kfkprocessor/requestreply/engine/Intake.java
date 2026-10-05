@@ -104,7 +104,7 @@ public final class Intake {
             lanes.resume();
         }
         if (granted <= 0) {
-            return new IntakeResult(List.of(), List.of(), false);
+            return new IntakeResult(List.of(), List.of(), false, available);
         }
         if (!available) {
             // the store was probed (fail-closed detection) but there is nothing to accept: return the units

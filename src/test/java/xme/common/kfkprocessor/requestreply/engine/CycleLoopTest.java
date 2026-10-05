@@ -49,12 +49,14 @@ class CycleLoopTest {
     private static final class FakeStore implements AllowanceStore {
         boolean down;
         int reserves;
+        /** Units the Rate Budget grants per reserve; null = all asked. */
+        Long grantCap;
         @Override public long reserve(long units) {
             reserves++;
             if (down) {
                 throw new AllowanceStoreUnavailableException("down");
             }
-            return units;
+            return grantCap == null ? units : Math.min(units, grantCap);
         }
         @Override public void giveBack(long units) { }
     }
@@ -561,5 +563,24 @@ class CycleLoopTest {
         assertEquals(1, probe.calls, "resume stays probe-gated");
         assertEquals(null, state.pauseReason());
         assertFalse(retry.holding());
+    }
+
+    // AC-17 / AC-14 (review B5): zero grant with a backlog is not idle: the member is kept alive by a poll that
+    // consumes nothing, pending work stays true, and the stall state keeps counting
+    @Test
+    void zeroGrantWithBacklogKeepsMemberAliveAndIsNotReportedIdle() {
+        CycleLoop<String, String, String> loop = loop(Duration.ofSeconds(5));
+        store.grantCap = 0L;
+        lanes.waiting.add(reqText("high", "a"));
+
+        loop.runOnce();
+
+        assertEquals(1, lanes.keepAlives, "zero grant with backlog must poll for liveness");
+        assertEquals(0, lanes.fetches, "no record may be consumed without allowance");
+        assertEquals(1, lanes.waiting.size());
+        assertEquals(Status.RUNNING, state.evaluate(), "backlog pending: worker must not be reported idle");
+
+        clock.advance(Duration.ofSeconds(61));
+        assertEquals(Status.STALLED, state.evaluate(), "no commit for longer than the threshold with a backlog");
     }
 }

@@ -382,4 +382,30 @@ class IntakeTest {
         assertTrue(r.immediateErrors().isEmpty(), "revoked malformed request dropped too");
         assertEquals(DRAW - 2, store.returned, "units of dropped requests returned");
     }
+
+    // AC-17 (review B5): zero grant with a backlog must tell the caller data is available, so it is not idle
+    @Test
+    void zeroGrantWithBacklogExposesAvailable() throws Exception {
+        backlog("high", 5);
+        store.available = 0;
+
+        IntakeResult r = intake.intake();
+
+        assertTrue(r.accepted().isEmpty());
+        assertTrue(java.util.Arrays.stream(IntakeResult.class.getRecordComponents())
+                        .anyMatch(c -> c.getName().equals("available")),
+                "IntakeResult must expose `available`");
+        var accessor = IntakeResult.class.getMethod("available");
+        assertEquals(true, accessor.invoke(r), "backlog present, grant zero: available must be true");
+    }
+
+    // control: nothing waiting and zero grant: available is false
+    @Test
+    void zeroGrantWithoutBacklogReportsNothingAvailable() throws Exception {
+        store.available = 0;
+
+        IntakeResult r = intake.intake();
+
+        assertEquals(false, IntakeResult.class.getMethod("available").invoke(r));
+    }
 }

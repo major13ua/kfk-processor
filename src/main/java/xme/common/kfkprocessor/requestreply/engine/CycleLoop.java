@@ -91,6 +91,18 @@ public final class CycleLoop<K, REQ, RES> {
             return tickPaused();
         }
         if (in.accepted().isEmpty() && in.immediateErrors().isEmpty()) {
+            if (in.available()) {
+                // backlog but no allowance: not idle; poll (consuming nothing) so max.poll.interval is not exceeded
+                state.setPendingWork(true);
+                try {
+                    intake.keepAlive();
+                } catch (LaneAccessDeniedException e) {
+                    return onLanesDenied();
+                } catch (RuntimeException e) {
+                    LOG.log(System.Logger.Level.WARNING, "Keep-alive poll failed: " + e.getClass().getName());
+                }
+                return Iteration.IDLE;
+            }
             state.setPendingWork(false);
             return Iteration.IDLE;
         }

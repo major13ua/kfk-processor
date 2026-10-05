@@ -49,7 +49,7 @@
 | F12 | Held or in-flight Cycle does not survive a rebalance (A1) | done |
 | F13 | Sink recovers from definitive commit failure and epoch abort (A2) | done |
 | F14 | Demote only the first broker-rejected reply per round (A4) | done |
-| F15 | Zero grant with a backlog keeps the member alive (B5) | todo |
+| F15 | Zero grant with a backlog keeps the member alive (B5) | done |
 | F16 | Propagate KafkaConnectionDetails and SslBundles to consumer, producer, Admin probe (B6) | todo |
 | F17 | Count substituted fallbacks as UNDELIVERABLE and surface dropped replies (B7) | todo |
 | F18 | Close review r2 Group C and cheap Group D items | todo |
