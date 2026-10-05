@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** to supply only a Handler and configuration
 > **So that** I get a working request-reply worker without writing consumption, rate control or commit logic
 >
-> — `spec.md §4, US-01, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-01, verbatim` · full text: [spec.md](../spec.md)
 
 Runs requests that share a Request Key one after another while different keys keep running in parallel.
 
@@ -37,19 +37,19 @@ Runs requests that share a Request Key one after another while different keys ke
 > `Engine->>Handler: dispatches A, B and C in parallel, D queued behind C`
 > `Engine->>Handler: dispatches D after C finished (arrival order per key)`
 >
-> — `sad.md §6, flow 6 «failed, slow and ordered requests», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 6 «failed, slow and ordered requests», abridged` · full text: [sad.md](../sad.md)
 
 > | Ordering | Same-key requests run in order within a lane; Requesters must send same-key requests to one lane (see §11) | here |
 >
-> — `sad.md §8, Ordering, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §8, Ordering, verbatim` · full text: [sad.md](../sad.md)
 
 > | Open architectural decision: cross-lane ordering of same-key requests | Open question | Guarantee is order per key within a lane; Requesters must send same-key requests to one lane (cross-lane order is not guaranteed: a low-share lane can deliver an older request in a later Cycle); tighten spec AC-07c ("arrival order") to "within a lane" and state the rule in the starter guide | Tech Lead | before `sdd:tasks` |
 >
-> — `sad.md §11, open decision, cross-lane ordering, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §11, open decision, cross-lane ordering, verbatim` · full text: [sad.md](../sad.md)
 
 > | Open architectural decision: per-key ordering may cut parallelism against the 2,000 requests/s target (spec §8) | Open question | Measure with the pilot service's real key distribution | Tech Lead | before `sdd:tasks` |
 >
-> — `sad.md §11, open decision, parallelism vs 2,000 requests/s, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §11, open decision, parallelism vs 2,000 requests/s, verbatim` · full text: [sad.md](../sad.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -61,7 +61,7 @@ No DB changes.
 
 - Same `requestKey` in one lane runs sequentially in arrival order; different keys in parallel on virtual threads. Order across lanes is not guaranteed.
 
-— `contracts/public-api.md §1, abridged` · full text: [public-api.md](../contracts/public-api.md)
+: `contracts/public-api.md §1, abridged` · full text: [public-api.md](../contracts/public-api.md)
 
 ## Acceptance criteria
 
@@ -71,7 +71,7 @@ No DB changes.
 > **When** the Handlers run
 > **Then** those requests run one after another in arrival order, while requests with different Request Keys run in parallel
 >
-> — `spec.md §5, AC-07c, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-07c, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

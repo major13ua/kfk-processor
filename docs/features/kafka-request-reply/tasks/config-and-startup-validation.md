@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** to supply only a Handler and configuration
 > **So that** I get a working request-reply worker without writing consumption, rate control or commit logic
 >
-> — `spec.md §4, US-01, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-01, verbatim` · full text: [spec.md](../spec.md)
 
 Makes the worker refuse to start, in plain language, when configuration conflicts, a weight is not positive, there is no Handler or no worker identity.
 
@@ -38,11 +38,11 @@ Makes the worker refuse to start, in plain language, when configuration conflict
 > `Engine-->>Operator: refuses to start, names the conflicting values in plain language`
 > `Engine->>Engine: logs effective share per lane (5% minimum applied, other lanes scaled down)`
 >
-> — `sad.md §6, flow 4 «startup validation», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 4 «startup validation», abridged` · full text: [sad.md](../sad.md)
 
 > **Chosen:** Explicit identity required; absent identity refuses start (AC-15). The same identity is used for group membership and the transaction.
 >
-> — `adr/0005, Decision outcome, verbatim` · full text: [0005-require-a-stable-worker-identity.md](../adr/0005-require-a-stable-worker-identity.md)
+> Source: `adr/0005, Decision outcome, verbatim` · full text: [0005-require-a-stable-worker-identity.md](../adr/0005-require-a-stable-worker-identity.md)
 
 > | Aspect | Target | Measurement |
 > |---|---|---|
@@ -51,7 +51,7 @@ Makes the worker refuse to start, in plain language, when configuration conflict
 > | Commit window | 60 s (provisional) | startup validation |
 > | Priority Weight validity | every lane has a weight above 0; startup refuses a weight of 0 | startup validation |
 >
-> — `spec.md §6, NFR table rows Per-request Handler timeout, Cycle deadline, Commit window, Priority Weight validity, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6, NFR table rows Per-request Handler timeout, Cycle deadline, Commit window, Priority Weight validity, verbatim` · full text: [spec.md](../spec.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -64,7 +64,7 @@ No DB changes.
 - `@ConfigurationProperties("xme.request-reply")`: `worker-identity` (required, explicit), `reply-destination`, `rate-budget-per-second` (> 0), `lanes[].name|source|weight` (weight > 0), `min-lane-share` (5), `handler-timeout` (30s), `cycle-deadline` (derived, ≤ 80% of `commit-window`), `commit-window` (60s), `commit-retry-attempts` (3), `identity-window` (45s), `stall-threshold` (60s), `allowance-store.*`.
 - Startup error codes: `request_reply.config.handler_missing`, `.timeout_exceeds_cycle_deadline`, `.cycle_deadline_exceeds_commit_window_share`, `.weight_not_positive`, `.identity_missing`.
 
-— `contracts/public-api.md §3, abridged` · full text: [public-api.md](../contracts/public-api.md)
+: `contracts/public-api.md §3, abridged` · full text: [public-api.md](../contracts/public-api.md)
 
 ## Acceptance criteria
 
@@ -75,7 +75,7 @@ No DB changes.
 > **Then** it refuses to start and tells the Operator in plain language which values conflict
 > **And** (valid configuration) the worker logs the effective share of each Priority Lane; a lane whose share would fall below the 5% minimum share is raised to it and the other lanes are scaled down
 >
-> — `spec.md §5, AC-02, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-02, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-15: error
 
@@ -83,7 +83,7 @@ No DB changes.
 > **When** it starts
 > **Then** it refuses to start and explains that a stable identity must be configured
 >
-> — `spec.md §5, AC-15, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-15, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

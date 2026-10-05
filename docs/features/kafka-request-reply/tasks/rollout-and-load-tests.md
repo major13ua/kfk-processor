@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** to restart or replace workers one by one without reassigning work across the group
 > **So that** deployments do not interrupt consumption
 >
-> — `spec.md §4, US-07, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-07, verbatim` · full text: [spec.md](../spec.md)
 
 Verifies zero lane reassignment in a rolling restart, weights and minimum share under load, and the accepted rate against the Rate Budget.
 
@@ -38,13 +38,13 @@ Verifies zero lane reassignment in a rolling restart, weights and minimum share 
 > - **Then:** lane reassignment = 0 for workers that return within the identity window; other workers keep consuming.
 > - **How verify:** rollout test plus the group membership change counter.
 >
-> — `sad.md §10, QG-3 Rollout stability, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §10, QG-3 Rollout stability, verbatim` · full text: [sad.md](../sad.md)
 
 > - **When:** lanes are busy, a Handler is slow, or commits take long.
 > - **Then:** each lane within ±10 percentage points of its weight when all lanes are busy (provisional); Handler timeout default 30 s from dispatch, configurable (provisional); Cycle deadline ≤ 80% of the commit window, checked at startup (provisional); commit window 60 s (provisional); every lane has a weight above 0, startup refuses a weight of 0; stall indicator when work is pending and 60 s pass without a commit (provisional). Consistency Lag p95 target is TBD (spec §8) and is added here when set.
 > - **How verify:** per-lane accepted-rate metric under a busy-lanes load test; startup validation tests; timeout counter and cycle-duration metric; stall-indicator metric in a failure-scenario test.
 >
-> — `sad.md §10, QG-4 Predictable Cycle behaviour, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §10, QG-4 Predictable Cycle behaviour, verbatim` · full text: [sad.md](../sad.md)
 
 > | Aspect | Target | Measurement |
 > |---|---|---|
@@ -53,11 +53,11 @@ Verifies zero lane reassignment in a rolling restart, weights and minimum share 
 > | Priority Weight accuracy | each lane within ±10 percentage points of its effective share (weights normalised, minimum share 5%) when all lanes are busy (provisional) | per-lane accepted-rate metric |
 > | Lane reassignment during rolling restart | 0 for workers that return within the identity window | rollout test + group membership change counter |
 >
-> — `spec.md §6, NFR table rows Aggregate throughput, Rate Budget accuracy, Priority Weight accuracy, Lane reassignment during rolling restart, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6, NFR table rows Aggregate throughput, Rate Budget accuracy, Priority Weight accuracy, Lane reassignment during rolling restart, verbatim` · full text: [spec.md](../spec.md)
 
 > | Weight accuracy depends on partitions spread evenly across workers (ADR-0004) | Medium | Load test against ±10 percentage points; per-lane buckets as a later upgrade | Tech Lead | before first production release |
 >
-> — `sad.md §11, risk, weight accuracy, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §11, risk, weight accuracy, verbatim` · full text: [sad.md](../sad.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -67,7 +67,7 @@ No DB changes.
 
 ## API contract
 
-Internal — no API surface.
+Internal: no API surface.
 
 ## Acceptance criteria
 
@@ -77,7 +77,7 @@ Internal — no API surface.
 > **When** the group catches up
 > **Then** the total number of requests accepted across all workers stays within the Rate Budget in every sliding one-second window, within the tolerance in §6. A request counts as accepted when it is handed to a Handler, taking one unit of allowance at that moment
 >
-> — `spec.md §5, AC-10, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-10, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-11: happy path
 
@@ -85,7 +85,7 @@ Internal — no API surface.
 > **When** the group is running at its Rate Budget
 > **Then** each lane's share of accepted requests matches its Priority Weight within the tolerance in §6
 >
-> — `spec.md §5, AC-11, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-11, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-12: domain invariant
 
@@ -93,7 +93,7 @@ Internal — no API surface.
 > **When** other lanes have heavy traffic
 > **Then** that lane still receives at least its minimum share of the Rate Budget (5%, see §8) and its requests keep being served
 >
-> — `spec.md §5, AC-12, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-12, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-14: happy path
 
@@ -101,7 +101,7 @@ Internal — no API surface.
 > **When** the rollout runs
 > **Then** the other workers keep consuming without any reassignment of lanes
 >
-> — `spec.md §5, AC-14, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-14, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

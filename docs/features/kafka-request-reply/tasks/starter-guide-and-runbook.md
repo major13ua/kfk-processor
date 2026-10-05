@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** to supply only a Handler and configuration
 > **So that** I get a working request-reply worker without writing consumption, rate control or commit logic
 >
-> — `spec.md §4, US-01, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-01, verbatim` · full text: [spec.md](../spec.md)
 
 Documents the rules a Handler Owner, Requester and Operator must follow that the code cannot enforce.
 
@@ -36,23 +36,23 @@ Documents the rules a Handler Owner, Requester and Operator must follow that the
 
 > - Business retry after a Requester timeout: the Idempotency Key identifies the attempt, not the business operation, so Handler Owners must deduplicate with their own business identifier; documented in the starter guide.
 >
-> — `spec.md §6.1, Abuse cases, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6.1, Abuse cases, verbatim` · full text: [spec.md](../spec.md)
 
 > | Requesters reading uncommitted replies see abandoned commits; a stuck commit delays everyone for the Commit window (ADR-0002, spec §8 Q6) | High | Document the committed-reads-only requirement in the starter guide | Tech Lead | before `sdd:tasks` |
 >
-> — `sad.md §11, risk, committed reads, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §11, risk, committed reads, verbatim` · full text: [sad.md](../sad.md)
 
 > | Lost or scaled-down workers hold their lanes until the Identity window ends (ADR-0005, spec §8 Q7) | Medium | Runbook plus stranded-lane alert | Operator lead | before `sdd:tasks` |
 >
-> — `sad.md §11, risk, stranded lanes, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §11, risk, stranded lanes, verbatim` · full text: [sad.md](../sad.md)
 
 > | Cycle results are held in memory during commit retries and pauses; a crash re-runs Handlers (at-least-once, ADR-0007) | Low | Idempotency Key; documented in the starter guide | Handler Owner | starter guide |
 >
-> — `sad.md §11, risk, at-least-once on crash, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §11, risk, at-least-once on crash, verbatim` · full text: [sad.md](../sad.md)
 
 > | Open architectural decision: cross-lane ordering of same-key requests | Open question | Guarantee is order per key within a lane; Requesters must send same-key requests to one lane (cross-lane order is not guaranteed: a low-share lane can deliver an older request in a later Cycle); tighten spec AC-07c ("arrival order") to "within a lane" and state the rule in the starter guide | Tech Lead | before `sdd:tasks` |
 >
-> — `sad.md §11, open decision, ordering rule, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §11, open decision, ordering rule, verbatim` · full text: [sad.md](../sad.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -62,7 +62,7 @@ No DB changes.
 
 ## API contract
 
-Internal — no API surface.
+Internal: no API surface.
 
 ## Acceptance criteria
 
@@ -72,7 +72,7 @@ Internal — no API surface.
 > **When** the timeout elapses (the timer starts when the Handler is dispatched)
 > **Then** the Requester receives an Error Reply for a timeout, the Handler is signalled to cancel (cooperative: a Handler may still finish its side effects, which the starter guide documents next to the Idempotency Key note), and the Cycle is not delayed beyond its deadline
 >
-> — `spec.md §5, AC-07, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-07, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

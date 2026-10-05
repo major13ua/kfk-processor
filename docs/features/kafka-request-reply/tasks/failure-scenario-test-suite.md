@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** a reply that carries my correlation identifier, and never two committed replies for one request
 > **So that** I can match and trust the answer
 >
-> — `spec.md §4, US-03, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-03, verbatim` · full text: [spec.md](../spec.md)
 
 Proves 0 lost or duplicated committed replies under kill, failed commit, unavailable destination and limiter outage, which is the accepted success measure.
 
@@ -38,25 +38,25 @@ Proves 0 lost or duplicated committed replies under kill, failed commit, unavail
 > - **Then:** lost or duplicated committed replies = 0; Handlers are not re-run because of a send failure.
 > - **How verify:** failure-scenario test suite (kill mid-Cycle, failed commit, oversized reply, unavailable destination) reading committed replies only; production reconciliation of requests against replies.
 >
-> — `sad.md §10, QG-2 Reply integrity, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §10, QG-2 Reply integrity, verbatim` · full text: [sad.md](../sad.md)
 
 > - **When:** several workers share one Rate Budget and a backlog exists, or the Rate Budget store becomes unreachable.
 > - **Then:** accepted rate ≤ Rate Budget × 1.10 in any sliding 1 s window (provisional); new requests stop within 5 s of the store becoming unreachable and resume within 30 s of its return (provisional); aggregate throughput ≥ 2,000 requests/s per worker group (provisional).
 > - **How verify:** load test in the performance environment against the worker "accepted per second" metric (counted at Cycle intake, the same event the limiter counts) vs the configured budget; failure-scenario test that cuts the store.
 >
-> — `sad.md §10, QG-1 Downstream protection, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §10, QG-1 Downstream protection, verbatim` · full text: [sad.md](../sad.md)
 
 > | Aspect | Target | Measurement |
 > |---|---|---|
 > | Lost or duplicated committed replies | 0 | failure-scenario test suite |
 > | Pause on limiter outage | new requests stop within 5 s of the store becoming unreachable; resume within 30 s of its return (provisional) | failure-scenario test |
 >
-> — `spec.md §6, NFR table rows Lost or duplicated committed replies, Pause on limiter outage, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6, NFR table rows Lost or duplicated committed replies, Pause on limiter outage, verbatim` · full text: [spec.md](../spec.md)
 
 > `Note over Engine: worker killed before commit`
 > `Engine->>Handler: runs R with the same Idempotency Key K`
 >
-> — `sad.md §6, flow 5 «killed mid-Cycle, restart with the same identity», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 5 «killed mid-Cycle, restart with the same identity», abridged` · full text: [sad.md](../sad.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -66,7 +66,7 @@ No DB changes.
 
 ## API contract
 
-Internal — no API surface.
+Internal: no API surface.
 
 ## Acceptance criteria
 
@@ -76,7 +76,7 @@ Internal — no API surface.
 > **When** the same request is executed again after a failure or restart
 > **Then** the Handler receives the same Idempotency Key as the first time
 >
-> — `spec.md §5, AC-03, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-03, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-05: domain invariant
 
@@ -84,7 +84,7 @@ Internal — no API surface.
 > **When** a Cycle is repeated after a failure or restart
 > **Then** a Requester reading committed replies sees only one reply for that request attempt (a new attempt by the Requester is a new request)
 >
-> — `spec.md §5, AC-05, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-05, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-08b: error
 
@@ -92,7 +92,7 @@ Internal — no API surface.
 > **When** the worker tries to commit the Cycle
 > **Then** the worker pauses as in AC-09, alerts the Operator, stays in its group, does not run the Handlers of that Cycle again, and resumes automatically when the destination returns
 >
-> — `spec.md §5, AC-08b, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-08b, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-18: cross-context
 
@@ -100,7 +100,7 @@ Internal — no API surface.
 > **When** a worker needs allowance to accept requests
 > **Then** it stops accepting new requests, stays a member of its group, shows a paused state to the Operator, and resumes automatically when the store returns without exceeding the Rate Budget
 >
-> — `spec.md §5, AC-18, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-18, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-19: cross-context
 
@@ -108,7 +108,7 @@ Internal — no API surface.
 > **When** Handlers hit their per-request timeout
 > **Then** the Requesters receive Error Replies and the accepted rate stays within the Rate Budget, so the degraded service is not hit harder by a retry storm from the worker
 >
-> — `spec.md §5, AC-19, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-19, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

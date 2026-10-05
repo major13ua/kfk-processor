@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** an Error Reply when my request fails or times out
 > **So that** I am not left waiting and can decide to retry
 >
-> — `spec.md §4, US-04, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-04, verbatim` · full text: [spec.md](../spec.md)
 
 Builds the single commit of replies, Error Replies and positions, and converts a reply that cannot be delivered into an Error Reply without re-running Handlers.
 
@@ -36,21 +36,21 @@ Builds the single commit of replies, Error Replies and positions, and converts a
 
 > **Chosen:** One transaction per Cycle. The transaction timeout equals the Commit window. Requesters must read committed replies only (documented requirement, spec §8).
 >
-> — `adr/0002, Decision outcome, verbatim` · full text: [0002-commit-replies-and-positions-in-one-transaction-per-cycle.md](../adr/0002-commit-replies-and-positions-in-one-transaction-per-cycle.md)
+> Source: `adr/0002, Decision outcome, verbatim` · full text: [0002-commit-replies-and-positions-in-one-transaction-per-cycle.md](../adr/0002-commit-replies-and-positions-in-one-transaction-per-cycle.md)
 
 > **Chosen:** Failures specific to one reply (too large, cannot be encoded, rejected on send) become Error Replies in the same transaction. If the commit itself fails, it is retried with the same results, 3 attempts by default (configurable). When attempts run out, or the Error Reply cannot be delivered (destination unavailable), the worker pauses, alerts and stays in its group. A restart after that re-runs Handlers, which is the at-least-once case.
 >
-> — `adr/0007, Decision outcome, verbatim` · full text: [0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md](../adr/0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md)
+> Source: `adr/0007, Decision outcome, verbatim` · full text: [0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md](../adr/0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md)
 
 > `Handler-->>Engine: B replies with a result that cannot be encoded`
 > `Engine->>Engine: builds Error Reply for A (timeout) and B (undeliverable)`
 > `Engine->>Platform: commits replies and positions`
 >
-> — `sad.md §6, flow 2 «failures inside a Cycle», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 2 «failures inside a Cycle», abridged` · full text: [sad.md](../sad.md)
 
 > - **Personal data touched:** none added by the starter. Payloads may contain personal data; the starter must not copy payload content into logs, metrics or Error Replies.
 >
-> — `spec.md §6.1, Personal data touched, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6.1, Personal data touched, verbatim` · full text: [spec.md](../spec.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -62,7 +62,7 @@ No DB changes.
 
 - `error_reply.v1` category `undeliverable`: reply too large, cannot be encoded or rejected on send (AC-08). No message, stack trace or payload.
 
-— `contracts/events.md, request_reply.error_reply.v1, abridged` · full text: [events.md](../contracts/events.md)
+: `contracts/events.md, request_reply.error_reply.v1, abridged` · full text: [events.md](../contracts/events.md)
 
 ## Acceptance criteria
 
@@ -72,7 +72,7 @@ No DB changes.
 > **When** the worker tries to commit the Cycle
 > **Then** the Requester gets an Error Reply instead, the Handlers of that Cycle are not run again, and the other requests in it are unaffected
 >
-> — `spec.md §5, AC-08, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-08, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

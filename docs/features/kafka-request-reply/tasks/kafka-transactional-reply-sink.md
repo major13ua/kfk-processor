@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** a reply that carries my correlation identifier, and never two committed replies for one request
 > **So that** I can match and trust the answer
 >
-> — `spec.md §4, US-03, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-03, verbatim` · full text: [spec.md](../spec.md)
 
 Writes replies and request positions in one transaction so a repeated Cycle can never add a second committed reply.
 
@@ -36,27 +36,27 @@ Writes replies and request positions in one transaction so a repeated Cycle can 
 
 > **Chosen:** One transaction per Cycle. The transaction timeout equals the Commit window. Requesters must read committed replies only (documented requirement, spec §8).
 >
-> — `adr/0002, Decision outcome, verbatim` · full text: [0002-commit-replies-and-positions-in-one-transaction-per-cycle.md](../adr/0002-commit-replies-and-positions-in-one-transaction-per-cycle.md)
+> Source: `adr/0002, Decision outcome, verbatim` · full text: [0002-commit-replies-and-positions-in-one-transaction-per-cycle.md](../adr/0002-commit-replies-and-positions-in-one-transaction-per-cycle.md)
 
 > **Chosen:** Explicit identity required; absent identity refuses start (AC-15). The same identity is used for group membership and the transaction.
 >
-> — `adr/0005, Decision outcome, verbatim` · full text: [0005-require-a-stable-worker-identity.md](../adr/0005-require-a-stable-worker-identity.md)
+> Source: `adr/0005, Decision outcome, verbatim` · full text: [0005-require-a-stable-worker-identity.md](../adr/0005-require-a-stable-worker-identity.md)
 
 > **Chosen:** Failures specific to one reply (too large, cannot be encoded, rejected on send) become Error Replies in the same transaction. If the commit itself fails, it is retried with the same results, 3 attempts by default (configurable). When attempts run out, or the Error Reply cannot be delivered (destination unavailable), the worker pauses, alerts and stays in its group. A restart after that re-runs Handlers, which is the at-least-once case.
 >
-> — `adr/0007, Decision outcome, verbatim` · full text: [0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md](../adr/0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md)
+> Source: `adr/0007, Decision outcome, verbatim` · full text: [0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md](../adr/0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md)
 
 > | Aspect | Target | Measurement |
 > |---|---|---|
 > | Commit window | 60 s (provisional) | startup validation |
 > | Lost or duplicated committed replies | 0 | failure-scenario test suite |
 >
-> — `spec.md §6, NFR table rows Commit window, Lost or duplicated committed replies, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6, NFR table rows Commit window, Lost or duplicated committed replies, verbatim` · full text: [spec.md](../spec.md)
 
 > `Engine->>Platform: commits reply and request position together`
 > `Platform-->>Requester: exactly one committed reply for this attempt`
 >
-> — `sad.md §6, flow 5 «killed mid-Cycle, restart with the same identity», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 5 «killed mid-Cycle, restart with the same identity», abridged` · full text: [sad.md](../sad.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -69,7 +69,7 @@ No DB changes.
 - Channel reply destination: producer worker, only inside the Cycle transaction together with the request positions. Consumers read committed records only.
 - Events `request_reply.reply.v1` and `request_reply.error_reply.v1` as in T1. Faults: `request_reply.reply_destination.permission_denied`, `.unavailable`.
 
-— `contracts/events.md, channel reply destination, abridged` · full text: [events.md](../contracts/events.md)
+: `contracts/events.md, channel reply destination, abridged` · full text: [events.md](../contracts/events.md)
 
 ## Acceptance criteria
 
@@ -79,7 +79,7 @@ No DB changes.
 > **When** a Cycle is repeated after a failure or restart
 > **Then** a Requester reading committed replies sees only one reply for that request attempt (a new attempt by the Requester is a new request)
 >
-> — `spec.md §5, AC-05, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-05, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** to give each Priority Lane a Priority Weight
 > **So that** important traffic gets a larger share without starving the others
 >
-> — `spec.md §4, US-06, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-06, verbatim` · full text: [spec.md](../spec.md)
 
 Computes the effective share of each Priority Lane and splits an allowance draw by it, which is what makes weights and the minimum share real.
 
@@ -36,19 +36,19 @@ Computes the effective share of each Priority Lane and splits an allowance draw 
 
 > **Chosen:** Every worker consumes every lane with a weighted split of its own draw. A lane below the 5% minimum share is raised to it and the rest scaled; idle lanes' share goes to busy lanes.
 >
-> — `adr/0004, Decision outcome, verbatim` · full text: [0004-consume-every-lane-in-every-worker-and-split-each-draw-by-weight.md](../adr/0004-consume-every-lane-in-every-worker-and-split-each-draw-by-weight.md)
+> Source: `adr/0004, Decision outcome, verbatim` · full text: [0004-consume-every-lane-in-every-worker-and-split-each-draw-by-weight.md](../adr/0004-consume-every-lane-in-every-worker-and-split-each-draw-by-weight.md)
 
 > `Engine->>Engine: splits the draw by Priority Weight, 5% minimum per lane`
 > `Engine->>Engine: hands its unused share to busy lanes`
 >
-> — `sad.md §6, flow 7 «allowance split across lanes», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 7 «allowance split across lanes», abridged` · full text: [sad.md](../sad.md)
 
 > | Aspect | Target | Measurement |
 > |---|---|---|
 > | Priority Weight accuracy | each lane within ±10 percentage points of its effective share (weights normalised, minimum share 5%) when all lanes are busy (provisional) | per-lane accepted-rate metric |
 > | Priority Weight validity | every lane has a weight above 0; startup refuses a weight of 0 | startup validation |
 >
-> — `spec.md §6, NFR table rows Priority Weight accuracy, Priority Weight validity, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6, NFR table rows Priority Weight accuracy, Priority Weight validity, verbatim` · full text: [spec.md](../spec.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -58,7 +58,7 @@ No DB changes.
 
 ## API contract
 
-Internal — no API surface.
+Internal: no API surface.
 
 ## Acceptance criteria
 
@@ -68,7 +68,7 @@ Internal — no API surface.
 > **When** the group is running at its Rate Budget
 > **Then** each lane's share of accepted requests matches its Priority Weight within the tolerance in §6
 >
-> — `spec.md §5, AC-11, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-11, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-12: domain invariant
 
@@ -76,7 +76,7 @@ Internal — no API surface.
 > **When** other lanes have heavy traffic
 > **Then** that lane still receives at least its minimum share of the Rate Budget (5%, see §8) and its requests keep being served
 >
-> — `spec.md §5, AC-12, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-12, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

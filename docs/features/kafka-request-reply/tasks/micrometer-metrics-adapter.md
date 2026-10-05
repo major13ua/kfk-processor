@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** Consistency Lag and a clear stall indicator
 > **So that** I can detect trouble even when no replies are being committed
 >
-> — `spec.md §4, US-08, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-08, verbatim` · full text: [spec.md](../spec.md)
 
 Publishes Consistency Lag per lane, the accepted rate, state and error counters the Operator watches.
 
@@ -36,15 +36,15 @@ Publishes Consistency Lag per lane, the accepted rate, state and error counters 
 
 > `Engine->>Metrics: clears stall, records Consistency Lag per lane, flags and excludes implausible samples`
 >
-> — `sad.md §6, flow 8 «stall detection and pause state», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 8 «stall detection and pause state», abridged` · full text: [sad.md](../sad.md)
 
 > - Forged or skewed request timestamps: Consistency Lag may go negative or inflate; the metric flags and excludes implausible samples.
 >
-> — `spec.md §6.1, Abuse cases, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6.1, Abuse cases, verbatim` · full text: [spec.md](../spec.md)
 
 > - **Personal data touched:** none added by the starter. Payloads may contain personal data; the starter must not copy payload content into logs, metrics or Error Replies.
 >
-> — `spec.md §6.1, Personal data touched, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6.1, Personal data touched, verbatim` · full text: [spec.md](../spec.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -56,7 +56,7 @@ No DB changes.
 
 - Meters (tags `lane`, `category` only): `requestreply.accepted`, `requestreply.consistency.lag` (timer per lane), `requestreply.state` (gauge), `requestreply.errorreply` (by category), `requestreply.handler.timeout`, `requestreply.commit.attempts`, `requestreply.cycle.duration`, `requestreply.group.membership.changes`. Names are proposals.
 
-— `contracts/public-api.md §5, abridged` · full text: [public-api.md](../contracts/public-api.md)
+: `contracts/public-api.md §5, abridged` · full text: [public-api.md](../contracts/public-api.md)
 
 ## Acceptance criteria
 
@@ -66,7 +66,7 @@ No DB changes.
 > **When** each Cycle commits
 > **Then** Consistency Lag is recorded for every committed reply and shown to the Operator per lane
 >
-> — `spec.md §5, AC-16, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-16, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

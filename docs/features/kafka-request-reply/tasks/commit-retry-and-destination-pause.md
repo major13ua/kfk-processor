@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** a reply that carries my correlation identifier, and never two committed replies for one request
 > **So that** I can match and trust the answer
 >
-> — `spec.md §4, US-03, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-03, verbatim` · full text: [spec.md](../spec.md)
 
 Keeps replies safe when the commit or the destination fails: retries the same results, pauses without leaving the group, and resumes without re-running Handlers.
 
@@ -36,21 +36,21 @@ Keeps replies safe when the commit or the destination fails: retries the same re
 
 > **Chosen:** Failures specific to one reply (too large, cannot be encoded, rejected on send) become Error Replies in the same transaction. If the commit itself fails, it is retried with the same results, 3 attempts by default (configurable). When attempts run out, or the Error Reply cannot be delivered (destination unavailable), the worker pauses, alerts and stays in its group. A restart after that re-runs Handlers, which is the at-least-once case.
 >
-> — `adr/0007, Decision outcome, verbatim` · full text: [0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md](../adr/0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md)
+> Source: `adr/0007, Decision outcome, verbatim` · full text: [0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md](../adr/0007-turn-send-failures-into-error-replies-and-retry-commits-without-rerunning-handlers.md)
 
 > `Engine->>Platform: retries the same results (up to 3 attempts, no Handler re-run)`
 > `Engine->>Operator: pauses, shows paused state, alerts, stays in group`
 > `Engine->>Platform: probes the destination`
 > `Engine->>Platform: re-commits the held results in a new transaction, Handlers not re-run`
 >
-> — `sad.md §6, flow 2 «failures inside a Cycle», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 2 «failures inside a Cycle», abridged` · full text: [sad.md](../sad.md)
 
 > `alt permission missing, at start or when a Cycle sends replies`
 > `Engine-->>Operator: reports configuration fault, accepts no requests, stays in group`
 > `Engine->>Platform: probes write permission`
 > `Engine->>Engine: resumes intake, a Cycle in progress is committed without re-running Handlers`
 >
-> — `sad.md §6, flow 4 «permission handling», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 4 «permission handling», abridged` · full text: [sad.md](../sad.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -62,7 +62,7 @@ No DB changes.
 
 - Runtime faults (state and metrics, no exception to the Handler): `request_reply.reply_destination.permission_denied` (AC-09), `request_reply.reply_destination.unavailable` (AC-08b). Property `commit-retry-attempts` (default 3).
 
-— `contracts/public-api.md §3, abridged` · full text: [public-api.md](../contracts/public-api.md)
+: `contracts/public-api.md §3, abridged` · full text: [public-api.md](../contracts/public-api.md)
 
 ## Acceptance criteria
 
@@ -72,7 +72,7 @@ No DB changes.
 > **When** the worker tries to commit the Cycle
 > **Then** the worker pauses as in AC-09, alerts the Operator, stays in its group, does not run the Handlers of that Cycle again, and resumes automatically when the destination returns
 >
-> — `spec.md §5, AC-08b, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-08b, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-09: authorization
 
@@ -80,7 +80,7 @@ No DB changes.
 > **When** it starts or a Cycle tries to send replies
 > **Then** the worker stops accepting requests, reports a configuration fault to the Operator, loses no request, stays in its group (no lane reassignment) and resumes automatically once the permission is restored, without running the Handlers of a Cycle in progress again
 >
-> — `spec.md §5, AC-09, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-09, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

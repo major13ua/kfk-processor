@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** to restart or replace workers one by one without reassigning work across the group
 > **So that** deployments do not interrupt consumption
 >
-> — `spec.md §4, US-07, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-07, verbatim` · full text: [spec.md](../spec.md)
 
 Consumes every lane in every worker under the configured stable identity so a restarted worker takes its lanes back and others keep consuming.
 
@@ -36,24 +36,24 @@ Consumes every lane in every worker under the configured stable identity so a re
 
 > **Chosen:** Every worker consumes every lane with a weighted split of its own draw. A lane below the 5% minimum share is raised to it and the rest scaled; idle lanes' share goes to busy lanes.
 >
-> — `adr/0004, Decision outcome, verbatim` · full text: [0004-consume-every-lane-in-every-worker-and-split-each-draw-by-weight.md](../adr/0004-consume-every-lane-in-every-worker-and-split-each-draw-by-weight.md)
+> Source: `adr/0004, Decision outcome, verbatim` · full text: [0004-consume-every-lane-in-every-worker-and-split-each-draw-by-weight.md](../adr/0004-consume-every-lane-in-every-worker-and-split-each-draw-by-weight.md)
 
 > **Chosen:** Explicit identity required; absent identity refuses start (AC-15). The same identity is used for group membership and the transaction.
 >
-> — `adr/0005, Decision outcome, verbatim` · full text: [0005-require-a-stable-worker-identity.md](../adr/0005-require-a-stable-worker-identity.md)
+> Source: `adr/0005, Decision outcome, verbatim` · full text: [0005-require-a-stable-worker-identity.md](../adr/0005-require-a-stable-worker-identity.md)
 
 > | Aspect | Target | Measurement |
 > |---|---|---|
 > | Identity window for a returning worker | 45 s (provisional) | rollout test |
 > | Lane reassignment during rolling restart | 0 for workers that return within the identity window | rollout test + group membership change counter |
 >
-> — `spec.md §6, NFR table rows Identity window for a returning worker, Lane reassignment during rolling restart, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6, NFR table rows Identity window for a returning worker, Lane reassignment during rolling restart, verbatim` · full text: [spec.md](../spec.md)
 
 > `Note over Platform,Engine: lanes held for the Identity window (45 s), other workers keep consuming, no reassignment`
 > `Engine->>Platform: rejoins and takes its lanes back`
 > `Platform-->>Engine: delivers R again (position was never committed)`
 >
-> — `sad.md §6, flow 5 «killed mid-Cycle, restart with the same identity», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 5 «killed mid-Cycle, restart with the same identity», abridged` · full text: [sad.md](../sad.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -66,7 +66,7 @@ No DB changes.
 - Channel request lanes: producer Requester, consumer every worker, partitions spread across workers. Ordering by Request Key within a lane only.
 - `request_reply.request.v1`: `correlation_id`, `request_key` required (missing → malformed), `created_at`, `data`. Open (OQ-1): record headers or body fields.
 
-— `contracts/events.md, channel request lanes, request_reply.request.v1, abridged` · full text: [events.md](../contracts/events.md)
+: `contracts/events.md, channel request lanes, request_reply.request.v1, abridged` · full text: [events.md](../contracts/events.md)
 
 ## Acceptance criteria
 
@@ -76,7 +76,7 @@ No DB changes.
 > **When** the rollout runs
 > **Then** the other workers keep consuming without any reassignment of lanes
 >
-> — `spec.md §5, AC-14, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-14, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

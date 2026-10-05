@@ -45,6 +45,8 @@ The core of this decision was fixed in the spec and interview; the options marke
 - Results of a Cycle are held in memory while retrying; a crash loses them and Handlers re-run on restart
 - A transient broker failure during the commit may cost up to 3 commit attempts inside the Commit window
 
+**Amendment (review r5 R1, decision 2026-10-05, pending Tech Lead sign-off):** Handlers never re-run inside the worker, EXCEPT on the hand-back path: when a Cycle fails after its Handlers ran and before the commit takes ownership (membership-change commit attempts exhausted, keep-alive failure in that retry, any unexpected failure after dispatch), every request of the Cycle is handed back and run again, including retained partitions and requests whose Handler failed or timed out; `request_reply.cycle.failed` is alerted once per failure streak. The decision otherwise stands. See spec AC-07b, AC-08 and §8.
+
 **Neutral**
 - Requires splitting reply-specific errors (sync, caught at send) from commit-level errors (async, abort the transaction)
 

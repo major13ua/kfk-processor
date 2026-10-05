@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** an Error Reply when my request fails or times out
 > **So that** I am not left waiting and can decide to retry
 >
-> — `spec.md §4, US-04, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-04, verbatim` · full text: [spec.md](../spec.md)
 
 Runs each Handler call on a virtual thread under a per-request timeout and the Cycle deadline, and turns every failure or timeout into one Error Reply without re-running the Handler.
 
@@ -39,26 +39,26 @@ Runs each Handler call on a virtual thread under a per-request timeout and the C
 > `Engine->>Handler: signals B to cancel (cooperative)`
 > `Engine->>Engine: builds Error Reply for B (timeout), no request waited past the Cycle deadline`
 >
-> — `sad.md §6, flow 6 «failed, slow and ordered requests», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 6 «failed, slow and ordered requests», abridged` · full text: [sad.md](../sad.md)
 
 > `Handler-->>Engine: A times out, cancelled cooperatively`
 >
-> — `sad.md §6, flow 2 «failures inside a Cycle», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 2 «failures inside a Cycle», abridged` · full text: [sad.md](../sad.md)
 
 > 5. **Handlers on virtual threads.** Each request runs on its own virtual thread; the timeout starts at dispatch, cancellation is cooperative, requests sharing a Request Key run in arrival order within a lane, and every failure becomes an Error Reply. Ordering across lanes is an open question (§11). Execution detail inside one module (no ADR: reversible).
 >
-> — `sad.md §4, strategic choice 5, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §4, strategic choice 5, verbatim` · full text: [sad.md](../sad.md)
 
 > | Aspect | Target | Measurement |
 > |---|---|---|
 > | Per-request Handler timeout | default 30 s from dispatch, configurable (provisional); implies a commit window above 37.5 s | startup validation + timeout counter |
 > | Cycle deadline | ≤ 80% of the commit window, checked at startup (provisional) | startup validation + cycle-duration metric |
 >
-> — `spec.md §6, NFR table rows Per-request Handler timeout, Cycle deadline, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6, NFR table rows Per-request Handler timeout, Cycle deadline, verbatim` · full text: [spec.md](../spec.md)
 
 > - **Personal data touched:** none added by the starter. Payloads may contain personal data; the starter must not copy payload content into logs, metrics or Error Replies.
 >
-> — `spec.md §6.1, Personal data touched, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6.1, Personal data touched, verbatim` · full text: [spec.md](../spec.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -70,7 +70,7 @@ No DB changes.
 
 - Handler contract: throwing any exception becomes an Error Reply (failure); the worker never re-runs a failed or timed-out Handler; cancellation is cooperative via `CancellationSignal`.
 
-— `contracts/public-api.md §1, abridged` · full text: [public-api.md](../contracts/public-api.md)
+: `contracts/public-api.md §1, abridged` · full text: [public-api.md](../contracts/public-api.md)
 
 ## Acceptance criteria
 
@@ -80,7 +80,7 @@ No DB changes.
 > **When** the Cycle completes
 > **Then** the Requester of that request receives an Error Reply naming the failure category, and the other requests in the same Cycle get their normal replies
 >
-> — `spec.md §5, AC-06, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-06, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-07: error
 
@@ -88,7 +88,7 @@ No DB changes.
 > **When** the timeout elapses (the timer starts when the Handler is dispatched)
 > **Then** the Requester receives an Error Reply for a timeout, the Handler is signalled to cancel (cooperative: a Handler may still finish its side effects, which the starter guide documents next to the Idempotency Key note), and the Cycle is not delayed beyond its deadline
 >
-> — `spec.md §5, AC-07, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-07, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-07b: error
 
@@ -96,7 +96,7 @@ No DB changes.
 > **When** the worker handles the failure
 > **Then** the Handler is not run again by the worker, and the Requester receives the Error Reply from the first failure
 >
-> — `spec.md §5, AC-07b, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-07b, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-13: domain invariant
 
@@ -104,7 +104,7 @@ No DB changes.
 > **When** a high-weight lane request is in the same Cycle
 > **Then** no request in the Cycle waits longer than the Cycle deadline, and unfinished requests receive Error Replies
 >
-> — `spec.md §5, AC-13, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-13, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-19: cross-context
 
@@ -112,7 +112,7 @@ No DB changes.
 > **When** Handlers hit their per-request timeout
 > **Then** the Requesters receive Error Replies and the accepted rate stays within the Rate Budget, so the degraded service is not hit harder by a retry storm from the worker
 >
-> — `spec.md §5, AC-19, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-19, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

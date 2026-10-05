@@ -213,8 +213,13 @@ sequenceDiagram
         end
         Engine->>Platform: re-commits the held results in a new transaction, Handlers not re-run
     end
+    alt Cycle fails after Handlers ran, before the commit takes ownership (membership retries exhausted, keep-alive failure, unexpected failure)
+        Engine->>Platform: hands every request of the Cycle back (retained partitions too), the first run's units stay spent
+        Engine->>Operator: alerts cycle.failed once per failure streak, no pause
+        Engine->>Handler: runs the handed-back requests again (exception to ADR-0007, spec AC-07b, AC-08, pending Tech Lead sign-off)
+    end
     alt commit outstanding past the commit window (producer fenced)
-        Engine->>Operator: pauses, alerts fenced (only if the fence shows on the first commit attempt; after a commit timeout the alert is unavailable, spec §8 A1), does not resume by itself
+        Engine->>Operator: pauses, alerts fenced (on any commit attempt made in the Cycle loop; after a commit timeout the alert is unavailable and a fence found later by the probe raises no new alert, spec §8 A1), does not resume by itself
         Operator->>Engine: restarts the worker, requests are fetched again, Handlers re-run
     end
 ```

@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** each Handler call to carry an Idempotency Key stable across re-executions
 > **So that** I can make repeated execution of my side effects harmless
 >
-> — `spec.md §4, US-02, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-02, verbatim` · full text: [spec.md](../spec.md)
 
 Delivers the Idempotency Key (same value on every re-execution) and the types that carry correlation and Request Key unchanged.
 
@@ -36,30 +36,30 @@ Delivers the Idempotency Key (same value on every re-execution) and the types th
 
 > **Chosen:** Starter library embedded in each worker. Target surfaces are `library-sdk` (public Handler and configuration contract) and `worker` (the running engine). It matches the spec's handler-only adoption goal and keeps Handlers next to the services they call.
 >
-> — `adr/0001, Decision outcome, verbatim` · full text: [0001-ship-engine-as-spring-boot-starter.md](../adr/0001-ship-engine-as-spring-boot-starter.md)
+> Source: `adr/0001, Decision outcome, verbatim` · full text: [0001-ship-engine-as-spring-boot-starter.md](../adr/0001-ship-engine-as-spring-boot-starter.md)
 
 > web and REST client dependencies are not part of the starter contract and must not be pulled into adopters.
 >
-> — `sad.md §2, Override note, abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §2, Override note, abridged` · full text: [sad.md](../sad.md)
 
 > an `engine` core that knows nothing about the platform client, the store or the metrics registry, talking through ports implemented by adapters.
 >
-> — `sad.md §5, Building block view, abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §5, Building block view, abridged` · full text: [sad.md](../sad.md)
 
 > `api/          Handler interface, request/reply/Error Reply types, configuration properties (library-sdk contract)`
 > `engine/       Cycle loop, intake with allowance, lane weights, Handler execution, commit, pause/stall state`
 > `ports/        AllowanceStore, RequestLanes, ReplySink (transactional), WorkerMetrics`
 > `adapters/     Kafka (lanes + transactional reply sink), shared-store allowance (Redis-compatible), Micrometer`
 >
-> — `sad.md §5, internal decomposition, abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §5, internal decomposition, abridged` · full text: [sad.md](../sad.md)
 
 > | ID strategy | Idempotency Key = lane + partition + position of the request: stable across re-execution, identifies the attempt, not the business operation; correlation identifier and Request Key echoed unchanged | here |
 >
-> — `sad.md §8, ID strategy, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §8, ID strategy, verbatim` · full text: [sad.md](../sad.md)
 
 > - **Personal data touched:** none added by the starter. Payloads may contain personal data; the starter must not copy payload content into logs, metrics or Error Replies.
 >
-> — `spec.md §6.1, Personal data touched, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6.1, Personal data touched, verbatim` · full text: [spec.md](../spec.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -74,11 +74,11 @@ No DB changes.
 - `ErrorCategory { FAILURE, TIMEOUT, UNDELIVERABLE }` (proposal, OQ-1). An Error Reply carries category, correlation id and Request Key only.
 - Public SPI `AllowanceStore { long reserve(long units); void giveBack(long units); }`; `reserve` throws `AllowanceStoreUnavailableException` (fail closed). `RequestLanes`, `ReplySink`, `WorkerMetrics` are internal ports.
 
-— `contracts/public-api.md §1, 2, 4, abridged` · full text: [public-api.md](../contracts/public-api.md)
+: `contracts/public-api.md §1, 2, 4, abridged` · full text: [public-api.md](../contracts/public-api.md)
 
 - `reply.v1`: `correlation_id`, `request_key`, `data`. `error_reply.v1`: `correlation_id`, `request_key`, `category` (failure | timeout | undeliverable). No message, stack trace or payload.
 
-— `contracts/events.md, request_reply.reply.v1 / error_reply.v1, abridged` · full text: [events.md](../contracts/events.md)
+: `contracts/events.md, request_reply.reply.v1 / error_reply.v1, abridged` · full text: [events.md](../contracts/events.md)
 
 ## Acceptance criteria
 
@@ -88,7 +88,7 @@ No DB changes.
 > **When** the same request is executed again after a failure or restart
 > **Then** the Handler receives the same Idempotency Key as the first time
 >
-> — `spec.md §5, AC-03, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-03, verbatim` · full text: [spec.md](../spec.md)
 
 ### AC-04: happy path
 
@@ -96,7 +96,7 @@ No DB changes.
 > **When** the reply is committed
 > **Then** the reply carries the same correlation identifier and Request Key
 >
-> — `spec.md §5, AC-04, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-04, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** Consistency Lag and a clear stall indicator
 > **So that** I can detect trouble even when no replies are being committed
 >
-> — `spec.md §4, US-08, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-08, verbatim` · full text: [spec.md](../spec.md)
 
 Tracks running, idle, paused and stalled so a stalled worker is never mistaken for a healthy one and a pause never raises a false stall.
 
@@ -40,17 +40,17 @@ Tracks running, idle, paused and stalled so a stalled worker is never mistaken f
 > `Engine->>Metrics: reports idle, no stall`
 > `Engine->>Metrics: clears stall, records Consistency Lag per lane, flags and excludes implausible samples`
 >
-> — `sad.md §6, flow 8 «stall detection and pause state», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 8 «stall detection and pause state», abridged` · full text: [sad.md](../sad.md)
 
 > | Aspect | Target | Measurement |
 > |---|---|---|
 > | Stall detection | stall indicator when work is pending and 60 s pass without a commit (provisional) | stall-indicator metric |
 >
-> — `spec.md §6, NFR table rows Stall detection, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §6, NFR table rows Stall detection, verbatim` · full text: [spec.md](../spec.md)
 
 > - Alert rules (AC-17): a stall is raised only when requests are pending or a Cycle is open and nothing commits for 60 s; an idle worker raises none, and a pause is shown as its own state and suppresses the stall indicator.
 >
-> — `sad.md §7, Monitoring, verbatim` · full text: [sad.md](../sad.md)
+> Source: `sad.md §7, Monitoring, verbatim` · full text: [sad.md](../sad.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -60,7 +60,7 @@ No DB changes.
 
 ## API contract
 
-Internal — no API surface.
+Internal: no API surface.
 
 ## Acceptance criteria
 
@@ -70,7 +70,7 @@ Internal — no API surface.
 > **When** the Operator looks at the monitoring view
 > **Then** a stall indicator is raised, so missing lag data is not mistaken for a healthy worker; an idle worker with nothing pending raises no stall, and a pause (AC-09, AC-18) is shown as its own state and suppresses the stall indicator
 >
-> — `spec.md §5, AC-17, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-17, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 

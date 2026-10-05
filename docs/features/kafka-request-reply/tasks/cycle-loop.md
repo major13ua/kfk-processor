@@ -28,7 +28,7 @@ To the executing agent: work from what is inlined here. If a slice is insufficie
 > **I want** to supply only a Handler and configuration
 > **So that** I get a working request-reply worker without writing consumption, rate control or commit logic
 >
-> — `spec.md §4, US-01, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §4, US-01, verbatim` · full text: [spec.md](../spec.md)
 
 Runs the normal request-reply path end to end: gather, run Handlers, commit, record Consistency Lag.
 
@@ -40,15 +40,15 @@ Runs the normal request-reply path end to end: gather, run Handlers, commit, rec
 > `Engine->>Platform: commits replies and request positions together`
 > `Engine->>Engine: records Consistency Lag per lane`
 >
-> — `sad.md §6, flow 1 «normal Cycle», abridged` · full text: [sad.md](../sad.md)
+> Source: `sad.md §6, flow 1 «normal Cycle», abridged` · full text: [sad.md](../sad.md)
 
 > **Chosen:** One transaction per Cycle. The transaction timeout equals the Commit window. Requesters must read committed replies only (documented requirement, spec §8).
 >
-> — `adr/0002, Decision outcome, verbatim` · full text: [0002-commit-replies-and-positions-in-one-transaction-per-cycle.md](../adr/0002-commit-replies-and-positions-in-one-transaction-per-cycle.md)
+> Source: `adr/0002, Decision outcome, verbatim` · full text: [0002-commit-replies-and-positions-in-one-transaction-per-cycle.md](../adr/0002-commit-replies-and-positions-in-one-transaction-per-cycle.md)
 
 > Committed approach: a reusable internal starter where a team supplies only a Handler and configuration. The worker enforces one global Rate Budget before accepting requests, splits it across N Priority Lanes by Priority Weight, runs handlers in parallel under a per-request timeout and a bounded Cycle, answers every accepted request with a reply or an Error Reply, and commits replies together with the request positions so a Requester never sees a duplicate committed reply. Handlers themselves are at-least-once and receive an Idempotency Key. Every Priority Lane is consumed by every worker of the group, its partitions spread across the workers. Requests that share a Request Key run one after another in arrival order, others run in parallel. The worker never retries a failed Handler; the Requester decides whether to retry. Rationale: market research found no library combining cross-worker rate limiting at intake, weighted multi-lane priority, per-request timeouts with error replies and atomic reply commit as a handler-only starter (the closest parallel-processing library is no longer maintained; the framework's own request-reply support covers only the basic reply path), so a custom starter fills a real gap. The adversary review's sharpest failure vector is an undeliverable reply that aborts the shared commit and replays the whole Cycle on every worker, repeating handler side effects; the approach therefore treats undeliverable replies per request, never as a reason to replay. Success is one production service running it plus a second team adopting it by writing only a Handler.
 >
-> — `spec.md §1, Context, abridged` · full text: [spec.md](../spec.md)
+> Source: `spec.md §1, Context, abridged` · full text: [spec.md](../spec.md)
 
 **Fallback:** insufficient or contradicted by the code → read the named file in full ([spec.md](../spec.md) · [sad.md](../sad.md) · [public-api.md](../contracts/public-api.md) · [events.md](../contracts/events.md) · [adr/](../adr/)) and follow it. Do not guess.
 
@@ -58,7 +58,7 @@ No DB changes.
 
 ## API contract
 
-Internal — no API surface.
+Internal: no API surface.
 
 ## Acceptance criteria
 
@@ -68,7 +68,7 @@ Internal — no API surface.
 > **When** the worker group starts and a Requester sends a request
 > **Then** the Requester receives the Handler's reply carrying the same correlation identifier as the request
 >
-> — `spec.md §5, AC-01, verbatim` · full text: [spec.md](../spec.md)
+> Source: `spec.md §5, AC-01, verbatim` · full text: [spec.md](../spec.md)
 
 ## Checklist
 
