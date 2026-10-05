@@ -81,6 +81,6 @@
 | # | Task | Status |
 |---|---|---|
 | F31 | Sink: collateral sibling failures, all-rejected InvalidRecord is a destination fault, mid-batch IT restored (R2, R4) | done |
-| F32 | Engine: alert streak only reset on COMMITTED, Error on commit path, missing engine tests (R3, R4) | todo |
+| F32 | Engine: alert streak only reset on COMMITTED, Error on commit path, missing engine tests (R3, R4) | done |
 | F33 | Startup: refuse compacted reply topic, non-vacuous lifecycle test (R4, R5) | todo |
 | F34 | Docs: rerun exception, ADR-0007, SAD, fenced wording, dashes, section 8 (R1, R5) | todo |

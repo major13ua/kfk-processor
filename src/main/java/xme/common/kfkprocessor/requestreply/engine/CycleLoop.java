@@ -46,7 +46,7 @@ public final class CycleLoop<K, REQ, RES> {
     private boolean lanesDenied;
     /** Handlers were dispatched in the current Cycle (their allowance units are spent). */
     private boolean dispatched;
-    /** A cycle.failed alert was raised and no iteration has succeeded since. */
+    /** A cycle.failed alert was raised and no iteration has committed since (idle, paused or held ones do not end the streak). */
     private boolean failureAlerted;
     private Instant lastLaneAttempt;
     private volatile boolean running;
@@ -80,7 +80,9 @@ public final class CycleLoop<K, REQ, RES> {
     /** One iteration: intake, run, commit; or only {@code retry.tick()} while paused. */
     public Iteration runOnce() {
         Iteration it = iterate();
-        failureAlerted = false; // a returning iteration ends the failure streak
+        if (it == Iteration.COMMITTED) {
+            failureAlerted = false; // only a committed iteration ends the failure streak
+        }
         return it;
     }
 
@@ -136,7 +138,7 @@ public final class CycleLoop<K, REQ, RES> {
             committed = retry.commit(results);
         } catch (CycleInterruptedException e) {
             throw e;
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
             // repeated rebalance rejections or a failing keep-alive poll in the retry: results are not held, so
             // serve the requests again
             if (!retry.holding()) {

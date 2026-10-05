@@ -1051,4 +1051,107 @@ class CycleLoopTest {
         assertTrue(sink.commits.isEmpty());
         assertEquals(0, metrics.lags.size());
     }
+
+    // ---- review r5 F32 (R3, R4) ----
+
+    // R3 (expected RED): only a COMMITTED iteration ends the failure streak; IDLE (zero grant with a backlog) must not
+    @Test
+    void idleIterationBetweenTwoCycleFailuresDoesNotEndTheFailureStreak() {
+        retryWithMembershipHooks(2);
+        lanes.waiting.add(reqText("high", "a"));
+        sink.failWith = new GroupMembershipChanged("rebalanced", null);
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+
+        org.junit.jupiter.api.Assertions.assertThrows(GroupMembershipChanged.class, loop::runOnce);
+        assertEquals(1, alerts.size());
+
+        store.grantCap = 0L;
+        assertEquals(CycleLoop.Iteration.IDLE, loop.runOnce());
+        store.grantCap = null;
+
+        org.junit.jupiter.api.Assertions.assertThrows(GroupMembershipChanged.class, loop::runOnce);
+        assertEquals(1, alerts.stream().filter(a -> CYCLE_FAILED.equals(a.faultId())).count(),
+                "failure, idle, failure: still one streak, one alert");
+    }
+
+    // R4 (expected RED): an Error (not a RuntimeException) from the keep-alive poll in the membership retry still
+    // hands the requests back and alerts, like the runCycle path
+    @Test
+    void errorFromKeepAliveInsideMembershipRetryHandsRequestsBackAndAlerts() {
+        retryWithMembershipHooks(3);
+        IncomingRequest a = reqText("high", "a");
+        IncomingRequest b = reqText("high", "b");
+        lanes.waiting.addAll(List.of(a, b));
+        sink.failWith = new GroupMembershipChanged("rebalanced", null);
+        lanes.onKeepAlive = () -> { throw new AssertionError(); };
+
+        org.junit.jupiter.api.Assertions.assertThrows(AssertionError.class, loopWithAlerts()::runOnce);
+
+        assertEquals(List.of(List.of(a, b)), lanes.released, "handed back once, in poll order");
+        assertEquals(List.of(CYCLE_FAILED), alerts.stream().map(CommitRetry.Alert::faultId).toList());
+        assertFalse(retry.holding());
+        assertTrue(sink.commits.isEmpty());
+    }
+
+    // R4 guard (expected GREEN on current code): hold() sets held, then alerts; an alert listener that throws makes
+    // commit() throw while holding(): the loop must not hand the requests back (the results are held), nor alert
+    // cycle.failed; the next probe commits the held results exactly once
+    @Test
+    void throwingAlertListenerWhileHoldingDoesNotReleaseRequestsAndHeldResultsCommitOnce() {
+        CycleCommitter<String, String> committer = new CycleCommitter<>(sink,
+                r -> ("reply|" + r.correlationId() + "|" + r.data()).getBytes(StandardCharsets.UTF_8),
+                e -> ("error|" + e.category()).getBytes(StandardCharsets.UTF_8));
+        boolean[] first = {true};
+        retry = new CommitRetry<>(committer, probe, state, clock, PROBE, 2, a -> {
+            alerts.add(a);
+            if (first[0]) {
+                first[0] = false;
+                throw new IllegalStateException("alert listener failed");
+            }
+        }, metrics, lanes::keepAlive, r -> lanes.revokedSinceFetch(r.request()));
+        IncomingRequest a = reqText("high", "a");
+        IncomingRequest b = reqText("high", "b");
+        lanes.waiting.addAll(List.of(a, b));
+        Map<String, Integer> handled = new LinkedHashMap<>();
+        handler = (ctx, req) -> { handled.merge(req, 1, Integer::sum); return "re:" + req; };
+        sink.failWith = new ReplyDestinationFault.Unavailable("down", null);
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, loop::runOnce);
+
+        assertTrue(lanes.released.isEmpty(), "held results are not handed back");
+        assertTrue(retry.holding());
+        assertTrue(alerts.stream().noneMatch(x -> CYCLE_FAILED.equals(x.faultId())), "no cycle.failed alert");
+
+        sink.failWith = null;
+        clock.advance(PROBE.plusSeconds(1));
+        assertEquals(CycleLoop.Iteration.COMMITTED, loop.runOnce());
+
+        assertEquals(1, sink.commits.size());
+        assertEquals(List.of(a.correlationId(), b.correlationId()),
+                sink.commits.get(0).stream().map(ReplyRecord::correlationId).toList());
+        assertEquals(Map.of("a", 1, "b", 1), handled, "each Handler ran exactly once");
+        assertTrue(lanes.released.isEmpty());
+    }
+
+    // R4 guard (expected GREEN on current code): an all-revoked Cycle must overwrite lastCommitted, otherwise the
+    // previous Cycle's replies are recorded as lag a second time
+    @Test
+    void allRevokedCycleAfterACommittedOneDoesNotRecordLagAgain() {
+        retryWithMembershipHooks(2);
+        lanes.waiting.addAll(List.of(reqText("high", "a"), reqText("high", "b")));
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+        assertEquals(CycleLoop.Iteration.COMMITTED, loop.runOnce());
+        assertEquals(2, metrics.lags.size());
+
+        IncomingRequest c = reqText("high", "c");
+        IncomingRequest d = reqText("high", "d");
+        lanes.waiting.addAll(List.of(c, d));
+        sink.failWith = new GroupMembershipChanged("rebalanced", null);
+        lanes.onKeepAlive = () -> { lanes.revoked.add(c); lanes.revoked.add(d); };
+        loop.runOnce();
+
+        assertEquals(1, sink.commits.size(), "the revoked Cycle committed nothing");
+        assertEquals(2, metrics.lags.size(), "no lag sample for the all-revoked Cycle");
+    }
 }
