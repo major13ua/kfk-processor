@@ -2,10 +2,13 @@ package xme.common.kfkprocessor.requestreply.adapters.kafka;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -127,14 +130,32 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
                 assignment);
     }
 
-    /** Keeps at most {@code quotaByLane.get(lane)} requests per lane (missing lane = 0), preserving order. */
+    /**
+     * Keeps at most {@code quotaByLane.get(lane)} requests per lane (missing lane = 0), preserving order. A lane's
+     * quota is taken in turn from each of its partitions (a prefix of each partition's requests), so no partition of
+     * the lane is drained ahead of the others.
+     */
     static List<IncomingRequest> limitByQuota(List<IncomingRequest> polled, Map<String, Integer> quotaByLane) {
-        Map<String, Integer> taken = new HashMap<>();
+        Map<String, Map<Integer, ArrayDeque<IncomingRequest>>> byLane = new HashMap<>();
+        for (IncomingRequest r : polled) {
+            byLane.computeIfAbsent(r.lane(), l -> new LinkedHashMap<>())
+                    .computeIfAbsent(r.partition(), p -> new ArrayDeque<>()).add(r);
+        }
+        Set<IncomingRequest> taken = Collections.newSetFromMap(new IdentityHashMap<>());
+        byLane.forEach((lane, partitions) -> {
+            int left = quotaByLane.getOrDefault(lane, 0);
+            while (left > 0 && partitions.values().stream().anyMatch(q -> !q.isEmpty())) {
+                for (ArrayDeque<IncomingRequest> q : partitions.values()) {
+                    if (left > 0 && !q.isEmpty()) {
+                        taken.add(q.poll());
+                        left--;
+                    }
+                }
+            }
+        });
         List<IncomingRequest> kept = new ArrayList<>();
         for (IncomingRequest r : polled) {
-            int n = taken.getOrDefault(r.lane(), 0);
-            if (n < quotaByLane.getOrDefault(r.lane(), 0)) {
-                taken.put(r.lane(), n + 1);
+            if (taken.contains(r)) {
                 kept.add(r);
             }
         }
@@ -290,20 +311,22 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
     }
 
     /**
-     * Pauses partitions of lanes that need nothing: no quota, or the buffer already holds their quota (so the
-     * surplus stays bounded), and all of them while paused. Nothing is fetched and lost.
+     * Pauses partitions that need nothing: their lane has no quota, or the buffer already holds the lane's quota
+     * from that partition (so the surplus stays bounded), and all of them while paused. Counted per partition, so a
+     * worker owning several partitions of a lane keeps fetching all of them instead of draining one while the
+     * others wait (a drained partition would make the lane look idle and give its share away). Nothing is fetched
+     * and lost.
      */
     private void applyPauses(Map<String, Integer> quotaByLane) {
-        Map<String, Integer> have = new HashMap<>();
+        Map<TopicPartition, Integer> have = new HashMap<>();
         for (IncomingRequest r : buffered) {
-            have.merge(r.lane(), 1, Integer::sum);
+            have.merge(partitionOf(r), 1, Integer::sum);
         }
         Set<TopicPartition> pause = new HashSet<>();
         Set<TopicPartition> resume = new HashSet<>();
         for (TopicPartition tp : consumer.assignment()) {
-            String lane = laneBySource.get(tp.topic());
-            int quota = quotaByLane.getOrDefault(lane, 0);
-            boolean satisfied = quota <= 0 || have.getOrDefault(lane, 0) >= quota;
+            int quota = quotaByLane.getOrDefault(laneBySource.get(tp.topic()), 0);
+            boolean satisfied = quota <= 0 || have.getOrDefault(tp, 0) >= quota;
             (paused || satisfied ? pause : resume).add(tp);
         }
         consumer.pause(pause);

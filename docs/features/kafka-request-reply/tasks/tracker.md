@@ -53,3 +53,4 @@
 | F16 | Propagate KafkaConnectionDetails and SslBundles to consumer, producer, Admin probe (B6) | done |
 | F17 | Count substituted fallbacks as UNDELIVERABLE and surface dropped replies (B7) | done |
 | F18 | Close review r2 Group C and cheap Group D items | done |
+| F19 | Weight Accuracy regression from cooperative assignor (found by F18 full run) | done |

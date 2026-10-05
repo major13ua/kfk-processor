@@ -666,6 +666,23 @@
         "docs/"
       ],
       "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r2.md"
+    },
+    {
+      "id": "F19",
+      "title": "Fix Weight Accuracy regression from cooperative assignor: per-partition quota in lanes adapter",
+      "layer": "infra",
+      "deps": [
+        "F18"
+      ],
+      "acs": [
+        "AC-12",
+        "AC-14"
+      ],
+      "dod": "WeightAccuracyIT passes again; per-partition quota unit tests added.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka/KafkaRequestLanes.java"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r2.md"
     }
   ]
 }

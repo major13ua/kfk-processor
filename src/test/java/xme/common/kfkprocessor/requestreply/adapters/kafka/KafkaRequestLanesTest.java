@@ -274,4 +274,42 @@ class KafkaRequestLanesTest {
         assertEquals(5L, consumer.position(tp));
         assertEquals(3, lanes.bufferedCount());
     }
+
+    // Weight Accuracy: a lane's quota is taken from each of its partitions, not drained from the first one
+    @Test
+    void quotaOfALaneIsTakenFromAllItsPartitionsKeepingEachPartitionContiguousAndInOrder() {
+        var consumer = new org.apache.kafka.clients.consumer.MockConsumer<byte[], byte[]>("earliest");
+        var p0 = new org.apache.kafka.common.TopicPartition("lane-high", 0);
+        var p1 = new org.apache.kafka.common.TopicPartition("lane-high", 1);
+        var lanes = lanesOver(consumer);
+        consumer.rebalance(List.of(p0, p1));
+        consumer.updateBeginningOffsets(Map.of(p0, 0L, p1, 0L));
+        fill(consumer, 0, 4);
+        fill(consumer, 1, 4);
+        lanes.awaitAvailable();
+
+        List<IncomingRequest> out = lanes.fetch(Map.of("high", 4));
+
+        assertEquals(4, out.size());
+        assertEquals(List.of(0L, 1L), out.stream().filter(r -> r.partition() == 0).map(IncomingRequest::position).toList());
+        assertEquals(List.of(0L, 1L), out.stream().filter(r -> r.partition() == 1).map(IncomingRequest::position).toList());
+        assertEquals(4, lanes.bufferedCount(), "the surplus of both partitions stays buffered");
+    }
+
+    // Weight Accuracy: a partition whose own share is buffered is paused, a sibling partition of the lane is not
+    @Test
+    void secondPartitionOfALaneStaysUnpausedWhenTheFirstAloneFilledTheQuota() {
+        var consumer = new org.apache.kafka.clients.consumer.MockConsumer<byte[], byte[]>("earliest");
+        var p0 = new org.apache.kafka.common.TopicPartition("lane-high", 0);
+        var p1 = new org.apache.kafka.common.TopicPartition("lane-high", 1);
+        var lanes = lanesOver(consumer);
+        consumer.rebalance(List.of(p0, p1));
+        consumer.updateBeginningOffsets(Map.of(p0, 0L, p1, 0L));
+        fill(consumer, 0, 2);
+        lanes.awaitAvailable(); // buffers p0's 2 records, p1 had none yet
+
+        lanes.fetch(Map.of("high", 2));
+
+        assertEquals(java.util.Set.of(p0), consumer.paused());
+    }
 }
