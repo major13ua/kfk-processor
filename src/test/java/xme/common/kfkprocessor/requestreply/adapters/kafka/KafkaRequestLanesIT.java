@@ -333,14 +333,21 @@ class KafkaRequestLanesIT {
             int max = 0;
             long end = System.nanoTime() + Duration.ofSeconds(60).toNanos();
             int fetched = 0;
+            var seenPartitions = new java.util.TreeSet<Integer>();
             while (fetched < 300 && System.nanoTime() < end) {
                 if (w.awaitAvailable()) {
-                    fetched += w.fetch(Map.of("high", 5, "low", 5)).size();
+                    var got = w.fetch(Map.of("high", 5, "low", 5));
+                    got.forEach(r -> seenPartitions.add(r.partition()));
+                    fetched += got.size();
                 }
                 max = Math.max(max, w.bufferedCount());
             }
             assertTrue(fetched >= 300, "fetched " + fetched);
-            assertTrue(max <= 200 * partitions, "surplus buffer grew to " + max + " on " + partitions + " partitions");
+            assertEquals(java.util.Set.of(0, 1, 2), seenPartitions, "every owned partition was fetched");
+            // per partition: it is paused only once the buffer holds its quota (5), so until then one poll
+            // (max.poll.records) can still land on it: quota + one poll per partition, plus slack
+            int bound = partitions * (5 + KafkaRequestLanes.MAX_POLL_RECORDS) + 10;
+            assertTrue(max <= bound, "surplus buffer grew to " + max + " on " + partitions + " partitions (bound " + bound + ")");
         }
     }
 }

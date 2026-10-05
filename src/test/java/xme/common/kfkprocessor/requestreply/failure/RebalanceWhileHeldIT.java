@@ -94,7 +94,7 @@ class RebalanceWhileHeldIT {
                         return "pong-b:" + req;
                     }, faultB.beans(ids.group()))) {
                 await("second member joined the group", Duration.ofSeconds(30), () -> members(ids.group()) == 2);
-                pause(Duration.ofSeconds(5));
+                await("B served the moved partition", Duration.ofSeconds(30), () -> handledB.count() >= N);
 
                 faultA.failNextCommits.set(0);
 

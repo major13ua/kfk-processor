@@ -73,5 +73,5 @@
 | F26 | Engine: keep-alive failure hand-back, budget units kept once Handlers ran, lag over committed only, tick() membership test (S1-S3, T2-T4) | done |
 | F27 | Startup: lane source validation, probe/lifecycle Invalid tests (T1) | done |
 | F28 | Sink: wrapped CommitFailed, mid-batch reject IT rework, Alert.reason null note (T5, S5) | done |
-| F29 | Test hardening (stage-2 test items) | todo |
+| F29 | Test hardening (stage-2 test items) | done |
 | F30 | Docs: fenced wording, runbook, test-plan, section 8 deferral (S4) | todo |

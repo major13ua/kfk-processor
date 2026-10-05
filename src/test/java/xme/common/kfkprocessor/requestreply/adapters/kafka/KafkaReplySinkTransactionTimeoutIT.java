@@ -47,8 +47,9 @@ import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
  * That premise is wrong for kafka-clients 4.2.1: TransactionManager (EndTxnHandler) maps INVALID_PRODUCER_EPOCH to
  * PRODUCER_FENCED, so the commit fails with ProducerFencedException, which the sink cannot tell from a real fence.
  * Human decision (option 3): a fence on commit is permanent: the worker pauses with the {@code fenced} alert and
- * never re-sends (no duplicate replies, AC-05); a restart (new sink, new producer) re-sends the Cycle, with exactly
- * one committed reply per request and the positions advanced once.
+ * never re-sends (no duplicate replies, AC-05). The restarted sink below (new producer taking the id) only proves
+ * producer recovery, not the restart path (a restart re-fetches the requests and re-runs the Handlers); it commits
+ * exactly one reply per request with the positions advanced once.
  */
 @Testcontainers
 class KafkaReplySinkTransactionTimeoutIT {
@@ -152,7 +153,7 @@ class KafkaReplySinkTransactionTimeoutIT {
             assertThrows(ReplyDestinationFault.Fenced.class, () -> committer(sink).commit(cycle));
         }
 
-        // restart: a new sink with a new producer takes the id and sends the held Cycle again
+        // restart: a new sink with a new producer takes the id; commits the same Cycle object (producer recovery only, a real restart re-fetches the requests and re-runs the Handlers)
         try (var restarted = new KafkaReplySink(new KafkaProducer<>(producerProps), replies, Map.of("main", requests),
                 groupMeta)) {
             assertTrue(committer(restarted).commit(cycle).failures().isEmpty());

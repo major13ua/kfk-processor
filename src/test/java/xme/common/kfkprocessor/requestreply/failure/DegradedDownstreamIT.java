@@ -24,7 +24,7 @@ class DegradedDownstreamIT {
     /** Requests from this index on hit the Handler timeout; those before fail fast. */
     private static final int FIRST_SLOW = N - 10;
 
-    private record Sample(long atMillis, double accepted) {
+    private record Sample(long atNanos, double accepted) {
     }
 
     private static double accepted(Worker w) {
@@ -54,7 +54,7 @@ class DegradedDownstreamIT {
             List<Sample> samples = new CopyOnWriteArrayList<>();
             Thread sampler = new Thread(() -> {
                 while (!Thread.currentThread().isInterrupted()) {
-                    samples.add(new Sample(System.currentTimeMillis(), accepted(w)));
+                    samples.add(new Sample(System.nanoTime(), accepted(w)));
                     try {
                         Thread.sleep(25);
                     } catch (InterruptedException e) {
@@ -91,8 +91,8 @@ class DegradedDownstreamIT {
 
             double total = samples.get(samples.size() - 1).accepted();
             assertThat(total).as("requestreply.accepted counts every request taken in").isGreaterThanOrEqualTo(N);
-            double worst = maxAcceptedInAnyWindow(samples, Duration.ofSeconds(1));
-            assertThat(worst).as("requestreply.accepted in any 1 s window (budget " + BUDGET + ")")
+            double worst = maxAcceptedRatePerSecond(samples, Duration.ofSeconds(1));
+            assertThat(worst).as("requestreply.accepted per second over any window of at least 1 s (budget " + BUDGET + ")")
                     .isLessThanOrEqualTo(BUDGET * BUDGET_TOLERANCE);
             // not by construction: the budget, not the Handlers, was what held the intake back during the fast phase
             assertThat(worst).as("the budget was the binding limit (accepted reached it)")
@@ -104,17 +104,22 @@ class DegradedDownstreamIT {
         return Integer.parseInt(r.correlationId().substring(r.correlationId().lastIndexOf('-') + 1));
     }
 
-    /** Largest increase of the cumulative counter over any window of at least {@code window}. */
-    private static double maxAcceptedInAnyWindow(List<Sample> samples, Duration window) {
+    /**
+     * Largest accepted rate (per second) over any window of at least {@code window}: the counter increase divided by
+     * the actual span between the two samples, so a window stretched by sampler jitter is not over-counted.
+     */
+    private static double maxAcceptedRatePerSecond(List<Sample> samples, Duration window) {
         double max = 0;
         int lo = 0;
         for (int hi = 0; hi < samples.size(); hi++) {
             // newest start sample that is at least one window older than the end sample
-            while (lo + 1 < hi && samples.get(lo + 1).atMillis() <= samples.get(hi).atMillis() - window.toMillis()) {
+            while (lo + 1 < hi && samples.get(lo + 1).atNanos() <= samples.get(hi).atNanos() - window.toNanos()) {
                 lo++;
             }
-            if (samples.get(hi).atMillis() - samples.get(lo).atMillis() >= window.toMillis()) {
-                max = Math.max(max, samples.get(hi).accepted() - samples.get(lo).accepted());
+            long spanNanos = samples.get(hi).atNanos() - samples.get(lo).atNanos();
+            if (spanNanos >= window.toNanos()) {
+                double delta = samples.get(hi).accepted() - samples.get(lo).accepted();
+                max = Math.max(max, delta * 1_000_000_000d / spanNanos);
             }
         }
         return max;
