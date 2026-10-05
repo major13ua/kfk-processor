@@ -44,6 +44,10 @@ public final class CycleLoop<K, REQ, RES> {
     private final Consumer<CommitRetry.Alert> alert;
     /** Set while the lanes cannot be read; retried every probe interval, alerted once per outage. */
     private boolean lanesDenied;
+    /** Handlers were dispatched in the current Cycle (their allowance units are spent). */
+    private boolean dispatched;
+    /** A cycle.failed alert was raised and no iteration has succeeded since. */
+    private boolean failureAlerted;
     private Instant lastLaneAttempt;
     private volatile boolean running;
     private Thread thread;
@@ -75,6 +79,13 @@ public final class CycleLoop<K, REQ, RES> {
 
     /** One iteration: intake, run, commit; or only {@code retry.tick()} while paused. */
     public Iteration runOnce() {
+        Iteration it = iterate();
+        failureAlerted = false; // a returning iteration ends the failure streak
+        return it;
+    }
+
+    private Iteration iterate() {
+        dispatched = false;
         if (retry.holding()) {
             return tickPaused();
         }
@@ -123,8 +134,14 @@ public final class CycleLoop<K, REQ, RES> {
         Optional<CommitResult> committed;
         try {
             committed = retry.commit(results);
-        } catch (GroupMembershipChanged e) {
-            abandon(in, e); // repeated rebalance rejections: serve the requests again
+        } catch (CycleInterruptedException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            // repeated rebalance rejections or a failing keep-alive poll in the retry: results are not held, so
+            // serve the requests again
+            if (!retry.holding()) {
+                abandon(in, e);
+            }
             throw e;
         }
         metrics.cycleDuration(Duration.between(start, clock.instant()));
@@ -133,19 +150,22 @@ public final class CycleLoop<K, REQ, RES> {
         }
         state.setPendingWork(false);
         reportUndeliverable(committed.get());
-        recordLag(results, committed.get());
+        recordLag(retry.lastCommitted(), committed.get());
         return Iteration.COMMITTED;
     }
 
     /** Before the commit takes ownership: hand the fetched requests back so they are served again, alert once. */
     private void abandon(IntakeResult in, Throwable cause) {
         try {
-            intake.abandon(in);
+            intake.abandon(in, dispatched);
         } catch (RuntimeException | Error e) {
             cause.addSuppressed(e);
         }
         try {
-            alert.accept(CommitRetry.Alert.fault(CYCLE_FAILED));
+            if (!failureAlerted) {
+                failureAlerted = true;
+                alert.accept(CommitRetry.Alert.fault(CYCLE_FAILED));
+            }
         } catch (RuntimeException | Error e) {
             cause.addSuppressed(e);
         }
@@ -158,6 +178,7 @@ public final class CycleLoop<K, REQ, RES> {
             if (!in.accepted().isEmpty()) {
                 in.accepted().stream().map(IncomingRequest::lane).distinct().forEach(lane -> metrics.accepted(lane,
                         in.accepted().stream().filter(r -> r.lane().equals(lane)).count()));
+                dispatched = true;
                 results.addAll(executor.executeCycle(in.accepted(), cycleDeadline));
             }
             for (IntakeResult.ImmediateError e : in.immediateErrors()) {

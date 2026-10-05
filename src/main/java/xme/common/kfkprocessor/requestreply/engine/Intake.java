@@ -184,6 +184,14 @@ public final class Intake {
      * accepted ones (immediate errors used none), like the fetch failure path.
      */
     public void abandon(IntakeResult in) {
+        abandon(in, false);
+    }
+
+    /**
+     * As {@link #abandon(IntakeResult)}; when the Handlers already ran ({@code handlersRan}) the allowance units were
+     * spent and stay spent, only the requests are handed back.
+     */
+    public void abandon(IntakeResult in, boolean handlersRan) {
         RuntimeException failure = null;
         try {
             lanes.release(in.fetched());
@@ -191,7 +199,9 @@ public final class Intake {
             failure = e;
         }
         try {
-            store.giveBack(in.accepted().size());
+            if (!handlersRan) {
+                store.giveBack(in.accepted().size());
+            }
         } catch (RuntimeException e) {
             if (failure == null) {
                 failure = e;

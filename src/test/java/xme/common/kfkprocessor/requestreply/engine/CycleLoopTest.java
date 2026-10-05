@@ -26,6 +26,7 @@ import xme.common.kfkprocessor.requestreply.ports.CommitResult;
 import xme.common.kfkprocessor.requestreply.ports.DestinationProbe;
 import xme.common.kfkprocessor.requestreply.ports.GroupMembershipChanged;
 import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
+import xme.common.kfkprocessor.requestreply.ports.LaneAccessDeniedException;
 import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
 import xme.common.kfkprocessor.requestreply.ports.ReplyRecord;
 import xme.common.kfkprocessor.requestreply.ports.ReplySink;
@@ -59,7 +60,9 @@ class CycleLoopTest {
             }
             return grantCap == null ? units : Math.min(units, grantCap);
         }
-        @Override public void giveBack(long units) { }
+        /** Every give-back call, in order (intake's unused units and a hand-back's units). */
+        final List<Long> givenBack = new ArrayList<>();
+        @Override public void giveBack(long units) { givenBack.add(units); }
     }
 
     private static class FakeLanes implements RequestLanes {
@@ -132,6 +135,7 @@ class CycleLoopTest {
         final java.util.concurrent.atomic.AtomicInteger handlerTimeouts = new java.util.concurrent.atomic.AtomicInteger();
         final java.util.concurrent.atomic.AtomicInteger commitAttempts = new java.util.concurrent.atomic.AtomicInteger();
         RuntimeException failAcceptedOnce;
+        RuntimeException failErrorReplyOnce;
         @Override public void accepted(String lane, long count) {
             if (failAcceptedOnce != null) {
                 RuntimeException e = failAcceptedOnce;
@@ -144,7 +148,14 @@ class CycleLoopTest {
             lags.add(new Object[] {lane, lag, implausible});
         }
         @Override public void state(State state) { states.add(state); }
-        @Override public void errorReply(ErrorCategory category) { errorReplies.add(category); }
+        @Override public void errorReply(ErrorCategory category) {
+            if (failErrorReplyOnce != null) {
+                RuntimeException e = failErrorReplyOnce;
+                failErrorReplyOnce = null;
+                throw e;
+            }
+            errorReplies.add(category);
+        }
         @Override public void handlerTimeout() { handlerTimeouts.incrementAndGet(); }
         @Override public void commitAttempt() { commitAttempts.incrementAndGet(); }
         @Override public void cycleDuration(Duration duration) { cycleDurations.add(duration); }
@@ -866,5 +877,178 @@ class CycleLoopTest {
         loopWithAlerts().runOnce();
 
         assertEquals(1, metrics.lags.size(), "the delivered request on partition 1 records a lag");
+    }
+
+    // ---- review r4 F26 (S1, S2, S3, T3, T4) ----
+
+    private static final String CYCLE_FAILED = "request_reply.cycle.failed";
+
+    private static List<String> corrs(List<IncomingRequest> l) {
+        return l.stream().map(IncomingRequest::correlationId).toList();
+    }
+
+    // S1/T4 (expected RED): the keep-alive poll inside the membership-change retry throws; the fetched requests are
+    // still handed back in poll order, cycle.failed is alerted, nothing committed, the loop serves them again
+    @Test
+    void keepAliveFailureInsideMembershipRetryHandsRequestsBackAlertsAndLoopContinues() {
+        retryWithMembershipHooks(3);
+        IncomingRequest a = reqText("high", "a");
+        IncomingRequest b = reqText("high", "b");
+        lanes.waiting.addAll(List.of(a, b));
+        sink.failWith = new GroupMembershipChanged("rebalanced", null);
+        lanes.onKeepAlive = () -> {
+            throw new LaneAccessDeniedException("denied", null);
+        };
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, loop::runOnce);
+
+        assertEquals(List.of(List.of(a, b)), lanes.released, "handed back once, in poll order: no silent loss");
+        assertEquals(1, alerts.size());
+        assertEquals(CYCLE_FAILED, alerts.get(0).faultId());
+        assertEquals(null, state.pauseReason());
+        assertFalse(retry.holding());
+        assertTrue(sink.commits.isEmpty());
+
+        lanes.onKeepAlive = () -> { };
+        sink.failWith = null;
+        assertEquals(CycleLoop.Iteration.COMMITTED, loop.runOnce());
+        assertEquals(List.of(a.correlationId(), b.correlationId()),
+                sink.commits.get(0).stream().map(ReplyRecord::correlationId).toList());
+    }
+
+    // S1/T4 (expected RED): keep-alive fails with a Kafka error on the second rebalance, after a first one succeeded
+    @Test
+    void secondKeepAliveFailureWhileNotHoldingHandsRequestsBackAndAlerts() {
+        retryWithMembershipHooks(3);
+        IncomingRequest a = reqText("high", "a");
+        lanes.waiting.add(a);
+        sink.failWith = new GroupMembershipChanged("rebalanced", null);
+        int[] polls = {0};
+        lanes.onKeepAlive = () -> {
+            if (++polls[0] == 2) {
+                throw new org.apache.kafka.common.KafkaException("poll failed");
+            }
+        };
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, loopWithAlerts()::runOnce);
+
+        assertEquals(List.of(List.of(a)), lanes.released);
+        assertEquals(List.of(CYCLE_FAILED), alerts.stream().map(CommitRetry.Alert::faultId).toList());
+        assertFalse(retry.holding());
+    }
+
+    // S2/T3 (coverage, expected pass): failure before Handler dispatch gives back exactly the accepted units
+    // (not the immediate-error one), also when the lane release throws
+    @Test
+    void failureBeforeDispatchGivesBackAcceptedUnitsEvenWhenReleaseThrows() {
+        FakeLanes failing = new FakeLanes() {
+            @Override public void release(List<IncomingRequest> requests) { throw new IllegalArgumentException("x"); }
+        };
+        lanes = failing;
+        lanes.waiting.addAll(List.of(reqText("high", "a"), req("high", 200), reqText("high", "b")));
+        store.grantCap = 3L;
+        int[] handlerCalls = {0};
+        handler = (ctx, r) -> { handlerCalls[0]++; return r; };
+        metrics.failAcceptedOnce = new IllegalStateException("before dispatch");
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, loopWithAlerts()::runOnce);
+
+        assertEquals(0, handlerCalls[0], "Handlers did not run");
+        assertEquals(List.of(1L, 2L), store.givenBack,
+                "intake returned 1 unused unit; the hand-back returned accepted().size() = 2");
+    }
+
+    // S2/T3 (expected RED): the failure came after executeCycle: the Handlers ran, the units stay spent
+    @Test
+    void failureAfterHandlersRanDoesNotGiveBackRateBudgetUnits() {
+        IncomingRequest a = reqText("high", "a");
+        lanes.waiting.addAll(List.of(a, req("high", 200), reqText("high", "b")));
+        store.grantCap = 3L;
+        int[] handlerCalls = {0};
+        handler = (ctx, r) -> { handlerCalls[0]++; return r; };
+        metrics.failErrorReplyOnce = new IllegalStateException("after dispatch");
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, loopWithAlerts()::runOnce);
+
+        assertEquals(2, handlerCalls[0], "Handlers ran");
+        assertEquals(1, lanes.released.size(), "requests are still handed back");
+        assertEquals(List.of(1L), store.givenBack, "only intake's unused unit; no hand-back give-back");
+    }
+
+    // S2/T3 (expected RED): commit attempts exhausted with GroupMembershipChanged: Handlers ran, units stay spent
+    @Test
+    void exhaustedMembershipRetryAfterHandlersRanDoesNotGiveBackUnits() {
+        retryWithMembershipHooks(2);
+        lanes.waiting.addAll(List.of(reqText("high", "a"), reqText("high", "b")));
+        store.grantCap = 2L;
+        sink.failWith = new GroupMembershipChanged("rebalanced", null);
+
+        org.junit.jupiter.api.Assertions.assertThrows(GroupMembershipChanged.class, loopWithAlerts()::runOnce);
+
+        assertEquals(1, lanes.released.size());
+        assertEquals(List.of(), store.givenBack, "no unused units at intake and none returned after dispatch");
+    }
+
+    // S2 (expected RED): cycle.failed is alerted once per consecutive failure streak (public-api.md: alert once)
+    @Test
+    void repeatedIdenticalCycleFailureAlertsOncePerStreak() {
+        retryWithMembershipHooks(2);
+        lanes.waiting.add(reqText("high", "a"));
+        sink.failWith = new GroupMembershipChanged("rebalanced", null);
+        CycleLoop<String, String, String> loop = loopWithAlerts();
+
+        for (int i = 0; i < 3; i++) {
+            org.junit.jupiter.api.Assertions.assertThrows(GroupMembershipChanged.class, loop::runOnce);
+        }
+        assertEquals(1, alerts.size(), "three consecutive identical failures: one alert");
+
+        sink.failWith = null;
+        assertEquals(CycleLoop.Iteration.COMMITTED, loop.runOnce());
+        lanes.waiting.add(reqText("high", "b"));
+        sink.failWith = new GroupMembershipChanged("rebalanced", null);
+        org.junit.jupiter.api.Assertions.assertThrows(GroupMembershipChanged.class, loop::runOnce);
+        assertEquals(2, alerts.size(), "a success ends the streak: the next failure alerts again");
+    }
+
+    private List<IncomingRequest> tenRequestsFourOnPartitionOne() {
+        List<IncomingRequest> all = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            all.add(at("high", i < 4 ? 1 : 0, i, "c" + i));
+        }
+        return all;
+    }
+
+    // S3 (expected RED): lag only for replies this worker actually committed after a membership change
+    @Test
+    void lagAfterMembershipChangeIsRecordedOnlyForCommittedReplies() {
+        retryWithMembershipHooks(2);
+        List<IncomingRequest> all = tenRequestsFourOnPartitionOne();
+        lanes.waiting.addAll(all);
+        sink.failWith = new GroupMembershipChanged("rebalanced", null);
+        lanes.onKeepAlive = () -> {
+            all.stream().filter(r -> r.partition() == 1).forEach(lanes.revoked::add);
+            sink.failWith = null;
+        };
+
+        assertEquals(CycleLoop.Iteration.COMMITTED, loopWithAlerts().runOnce());
+
+        assertEquals(6, sink.commits.get(0).size());
+        assertEquals(6, metrics.lags.size(), "no lag sample for the 4 replies of the revoked partition");
+    }
+
+    // S3 (expected RED): every partition revoked: nothing committed, no lag sample
+    @Test
+    void lagIsNotRecordedWhenEveryReplyWasRevoked() {
+        retryWithMembershipHooks(2);
+        List<IncomingRequest> all = tenRequestsFourOnPartitionOne();
+        lanes.waiting.addAll(all);
+        sink.failWith = new GroupMembershipChanged("rebalanced", null);
+        lanes.onKeepAlive = () -> all.forEach(lanes.revoked::add);
+
+        loopWithAlerts().runOnce();
+
+        assertTrue(sink.commits.isEmpty());
+        assertEquals(0, metrics.lags.size());
     }
 }

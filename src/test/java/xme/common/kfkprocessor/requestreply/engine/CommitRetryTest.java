@@ -384,4 +384,29 @@ class CommitRetryTest {
         assertNull(state.pauseReason());
         assertFalse(retry.holding());
     }
+
+    // review r4 T2: tick() hits GroupMembershipChanged while holding: revoked held results are dropped, the pause
+    // reason, the hold and the alerts stay as they were, and the next tick commits only what remains
+    @Test
+    void tickMembershipChangedDropsRevokedHeldResultsWithoutAlertOrReasonChange() {
+        withMembershipHooks();
+        sink.failures.add(unavailable());
+        assertTrue(retry.commit(twoPartitionCycle()).isEmpty());
+        assertEquals(1, alerts.size());
+        sink.failures.add(new GroupMembershipChanged("rebalanced", null));
+        revokedPartitions.add(0);
+        clock.advance(PROBE_EVERY.plusSeconds(1));
+
+        assertTrue(retry.tick().isEmpty());
+
+        assertEquals(List.of("c2"), retry.heldResults().stream().map(r -> r.request().correlationId()).toList());
+        assertEquals(1, alerts.size(), "no new alert");
+        assertEquals(PauseReason.DESTINATION, state.pauseReason());
+        assertTrue(retry.holding());
+
+        clock.advance(PROBE_EVERY.plusSeconds(1));
+        assertTrue(retry.tick().isPresent());
+        assertEquals(1, sink.calls.get(sink.calls.size() - 1).size());
+        assertNull(state.pauseReason());
+    }
 }

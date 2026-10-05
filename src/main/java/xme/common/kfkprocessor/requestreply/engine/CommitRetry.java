@@ -44,6 +44,7 @@ public final class CommitRetry<K, RES> {
     private List<HandlerResult<K, RES>> held;
     private WorkerState.PauseReason heldReason;
     private Instant lastProbe;
+    private List<HandlerResult<K, RES>> lastCommitted = List.of();
 
     public CommitRetry(CycleCommitter<K, RES> committer, DestinationProbe probe, WorkerState state, Clock clock,
             Duration probeInterval, int attempts, Consumer<Alert> alert) {
@@ -77,6 +78,7 @@ public final class CommitRetry<K, RES> {
                 commitAttempted();
                 CommitResult out = committer.commit(results);
                 state.commitSucceeded();
+                lastCommitted = results;
                 return Optional.of(out);
             } catch (GroupMembershipChanged ex) {
                 abandonIfInterrupted(ex);
@@ -88,6 +90,7 @@ public final class CommitRetry<K, RES> {
                 keepAlive.run(); // lets the rebalance complete so the revoked partitions are known
                 results = results.stream().filter(revokedSinceFetch.negate()).toList();
                 if (results.isEmpty()) {
+                    lastCommitted = results;
                     return Optional.of(new CommitResult(List.of()));
                 }
             } catch (ReplyDestinationFault fault) {
@@ -101,6 +104,11 @@ public final class CommitRetry<K, RES> {
         }
         hold(results, null);
         return Optional.empty();
+    }
+
+    /** The results the last successful {@link #commit} actually committed (after dropping revoked ones). */
+    public synchronized List<HandlerResult<K, RES>> lastCommitted() {
+        return lastCommitted;
     }
 
     /** The results held awaiting the destination, or null. */
