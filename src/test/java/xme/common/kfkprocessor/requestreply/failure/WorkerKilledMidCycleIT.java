@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-/** AC-03 and AC-05: a worker killed (SIGKILL) mid-Cycle and restarted with the same identity. */
+/** AC-03 and AC-05: a worker killed (SIGKILL) mid-Cycle, or after a commit, and restarted with the same identity. */
 @Testcontainers
 class WorkerKilledMidCycleIT {
 
@@ -58,6 +58,44 @@ class WorkerKilledMidCycleIT {
             assertReconciled(requested, replies);
             assertThat(replies).hasSize(1);
             assertThat(replies.get(0).body()).isEqualTo("pong:req-kill-1");
+        } finally {
+            second.destroyForcibly();
+            second.waitFor(30, TimeUnit.SECONDS);
+        }
+    }
+
+    // test-plan edge case: killed after commit but before the next fetch: no replay, no duplicate
+    @Test
+    void killedAfterCommitBeforeNextFetchIsNotReplayedAfterRestart() throws Exception {
+        Ids ids = Ids.fresh();
+        Path log = tmp.resolve("handler.log");
+        Files.createFile(log);
+        Map<String, Object> props = workerProps(ids, 1000, 100, Duration.ofSeconds(5), Duration.ofSeconds(20));
+        List<String> committed = List.of("done-1", "done-2", "done-3");
+        produce(ids.requests(), committed);
+
+        Process first = launch(props, log, "first", "answer");
+        try {
+            awaitReplies(ids.replies(), committed.size(), WAIT, Duration.ZERO);
+            // the Cycle is committed and the lane holds nothing newer: the next fetch has nothing to read
+            first.destroyForcibly();
+            assertThat(first.waitFor(30, TimeUnit.SECONDS)).as("killed worker exited").isTrue();
+        } finally {
+            first.destroyForcibly();
+        }
+        assertThat(lines(log)).as("first worker handled each request once").hasSize(committed.size());
+
+        Process second = launch(props, log, "second", "answer");
+        try {
+            produce(ids.requests(), List.of("after-1")); // proves the restarted worker is fetching
+            List<String> all = new ArrayList<>(committed);
+            all.add("after-1");
+            List<Rep> replies = awaitReplies(ids.replies(), all.size(), WAIT, Duration.ofSeconds(3));
+
+            assertReconciled(all, replies);
+            List<String> secondRuns = lines(log).stream().filter(l -> l.startsWith("second ")).toList();
+            assertThat(secondRuns).as("restart replays nothing committed, handles only the new request")
+                    .hasSize(1).allSatisfy(l -> assertThat(l).endsWith(" after-1"));
         } finally {
             second.destroyForcibly();
             second.waitFor(30, TimeUnit.SECONDS);

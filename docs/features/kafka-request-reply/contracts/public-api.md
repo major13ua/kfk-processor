@@ -101,6 +101,7 @@ Startup validation (flow 4) fails with a plain-language message naming the confl
 | `request_reply.config.lane_source_duplicate` | two lanes reading the same source |
 | `request_reply.config.handler_types_unsupported` | Handler `K`, `REQ` or `RES` resolves to a type other than `String` |
 | `request_reply.config.ssl_bundles_missing` | an SSL bundle named by the Kafka connection details is not defined |
+| `request_reply.config.allowance_store_missing` | no `allowance-store.redis-uri` and no `AllowanceStore` bean |
 
 Runtime faults (no exception to the Handler; state and metrics instead): `request_reply.reply_destination.permission_denied` (AC-09: no WRITE on the reply destination, no READ on a lane at the start probe, or no permission on the transactional id), `request_reply.request_lane.permission_denied` (AC-09: a later poll is denied READ on a lane or the group; the worker pauses, alerts once and retries every `probe-interval`), `request_reply.reply_destination.unavailable` (AC-08b), `request_reply.reply.undeliverable` (AC-08: a reply had no deliverable fallback and was dropped, the position commits; alert raised once per commit, no pause, no payload in the log), `request_reply.reply_destination.fenced` (AC-05: the producer is fenced, by a newer instance with the transactional id or by the broker aborting a commit held past the commit window; the producer is never re-created, nothing is re-sent, the worker stays paused (destination) until restarted), `request_reply.rate_budget_store.unavailable` (AC-18). Metric `errorReply(UNDELIVERABLE)` counts every reply replaced by its undeliverable Error Reply and every dropped reply; the consistency-lag sample is skipped only for dropped ones.
 
@@ -123,6 +124,7 @@ Micrometer meters, tags limited to `lane` and `category` (no payload, no keys):
 |---|---|
 | `requestreply.accepted` | requests taken at Cycle intake (counter, matches the limiter) |
 | `requestreply.consistency.lag` | timer per lane; implausible samples flagged and excluded |
+| `requestreply.consistency.lag.implausible` | counter per lane of excluded lag samples (negative, or over the one-day plausibility bound) |
 | `requestreply.state` | gauge: running, paused (limiter or destination), stalled |
 | `requestreply.errorreply` | counter by `category` |
 | `requestreply.handler.timeout` | counter |

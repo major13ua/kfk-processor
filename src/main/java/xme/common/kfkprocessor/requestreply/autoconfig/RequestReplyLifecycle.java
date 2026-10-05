@@ -1,7 +1,6 @@
 package xme.common.kfkprocessor.requestreply.autoconfig;
 
 import java.time.Duration;
-import java.util.Map;
 import java.util.function.Consumer;
 import org.springframework.context.SmartLifecycle;
 import xme.common.kfkprocessor.requestreply.engine.CommitRetry;
@@ -20,6 +19,8 @@ final class RequestReplyLifecycle implements SmartLifecycle {
 
     private static final System.Logger LOG = System.getLogger(RequestReplyLifecycle.class.getName());
     private static final String PERMISSION_DENIED = "request_reply.reply_destination.permission_denied";
+    /** Pause between keep-alive polls of the permission gate (capped by the probe interval): no busy spin. */
+    private static final long KEEP_ALIVE_PAUSE_MILLIS = 50;
 
     private final CycleLoop<?, ?, ?> loop;
     private final RequestLanes lanes;
@@ -67,14 +68,18 @@ final class RequestReplyLifecycle implements SmartLifecycle {
 
     private void awaitPermission() {
         long next = System.nanoTime() + probeInterval.toNanos();
+        long pauseMillis = Math.max(1, Math.min(KEEP_ALIVE_PAUSE_MILLIS, probeInterval.toMillis()));
         while (running && !Thread.currentThread().isInterrupted()) {
             try {
-                lanes.fetch(Map.of()); // all lanes paused: keeps the group membership alive, consumes nothing
+                lanes.keepAlive(); // all lanes paused: keeps the group membership alive, consumes nothing
                 if (System.nanoTime() - next < 0) {
+                    Thread.sleep(pauseMillis);
                     continue;
                 }
                 next = System.nanoTime() + probeInterval.toNanos();
                 probe.probe();
+            } catch (InterruptedException e) {
+                return; // stop() interrupts the gate
             } catch (ReplyDestinationFault | org.apache.kafka.common.errors.InterruptException e) {
                 continue;
             } catch (RuntimeException e) {

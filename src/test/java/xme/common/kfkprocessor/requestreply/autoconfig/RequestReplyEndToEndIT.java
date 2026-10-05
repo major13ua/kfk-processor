@@ -127,6 +127,7 @@ class RequestReplyEndToEndIT {
 
         assertThat(header(reply, "correlation_id")).isEqualTo("corr-42");
         assertThat(header(reply, "request_key")).isEqualTo("key-7");
+        assertThat(header(reply, "type")).as("wire type header of a Handler reply").isEqualTo("reply");
         assertThat(new String(reply.value(), StandardCharsets.UTF_8)).isEqualTo("pong:ping");
         // Consistency lag taken from created_at (about 2s), not implausible
         var lag = registry.find("requestreply.consistency.lag").tag("lane", "high").timer();

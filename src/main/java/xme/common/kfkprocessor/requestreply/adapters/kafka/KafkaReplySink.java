@@ -88,8 +88,7 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         this(() -> new KafkaProducer<>(producerProperties(properties, clientProperties, groupId)),
                 properties.getReplyDestination(),
                 sources(properties), groupMetadata != null ? groupMetadata : unfenced(groupId));
-        this.maxRecordBytes = ProducerConfig.configDef().defaultValues().get(ProducerConfig.MAX_REQUEST_SIZE_CONFIG) instanceof Integer i
-                ? i : Integer.MAX_VALUE;
+        this.maxRecordBytes = maxRecordBytes(producerProperties(properties, clientProperties, groupId));
     }
 
     /** Production constructor without a lanes consumer: no group fencing. */
@@ -153,6 +152,19 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
         p.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
         p.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
         return p;
+    }
+
+    /** Client-side record size limit of the producer: the configured {@code max.request.size}, else its default. */
+    static int maxRecordBytes(Map<?, ?> producerProperties) {
+        Object configured = producerProperties.get(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
+        if (configured instanceof Number n) {
+            return n.intValue();
+        }
+        if (configured instanceof String text && !text.isBlank()) {
+            return Integer.parseInt(text.trim());
+        }
+        return ProducerConfig.configDef().defaultValues().get(ProducerConfig.MAX_REQUEST_SIZE_CONFIG) instanceof Integer i
+                ? i : Integer.MAX_VALUE;
     }
 
     @Override

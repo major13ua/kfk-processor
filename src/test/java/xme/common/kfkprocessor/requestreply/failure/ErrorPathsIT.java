@@ -79,7 +79,7 @@ class ErrorPathsIT {
             assertThat(byId.get("slow-1").isErrorReply()).isTrue();
             assertThat(body(byId.get("slow-1"), "timeout")).as(byId.get("slow-1").body()).isTrue();
             for (String ok : List.of("ok-1", "ok-2", "ok-3")) {
-                assertThat(byId.get(ok).isErrorReply()).as(ok + " is a normal reply").isFalse();
+                assertThat(byId.get(ok).type()).as(ok + " is a normal reply, wire type").isEqualTo("reply");
                 assertThat(byId.get(ok).body()).isEqualTo("pong:req-" + ok);
             }
             assertThat(cancelled.get()).as("cancel signal reached the timed-out Handler").isEqualTo(1);
@@ -139,7 +139,7 @@ class ErrorPathsIT {
                 assertThat(r.isErrorReply()).as("big reply replaced by an Error Reply").isTrue();
                 assertThat(body(r, "undeliverable")).as(r.body()).isTrue();
             } else {
-                assertThat(r.isErrorReply()).as(r.correlationId() + " committed normally").isFalse();
+                assertThat(r.type()).as(r.correlationId() + " committed normally, wire type").isEqualTo("reply");
                 assertThat(r.body()).startsWith("pong:");
             }
         }
@@ -199,7 +199,9 @@ class ErrorPathsIT {
         }
     }
 
-    // AC-13: a slow Handler on the low-weight lane does not hold requests past the Cycle deadline
+    // AC-13: a slow Handler on the low-weight lane does not hold requests past the Cycle deadline. The slow requests
+    // share ONE Request Key, so all but the first wait queued behind it and are ended by the Cycle-deadline cut, not
+    // by their own Handler timeout (they are never dispatched).
     @Test
     void slowHandlersOnTheLowWeightLaneDoNotHoldRequestsPastTheCycleDeadline() throws Exception {
         Ids ids = Ids.fresh();
@@ -219,7 +221,7 @@ class ErrorPathsIT {
         List<String> fast = correlationIds("fast", 20);
         List<String> slow = correlationIds("slow", 5);
         produce(ids.requests(), fast);
-        produce(lowTopic, slow);
+        produce(lowTopic, slow, id -> "slow-key");
         HandlerLog handled = new HandlerLog();
 
         try (Worker w = startWorker(p, (ctx, req) -> {
@@ -229,7 +231,7 @@ class ErrorPathsIT {
             }
             return "pong:" + req;
         })) {
-            await("Handlers started", WAIT, () -> handled.count() >= fast.size() + slow.size());
+            await("Handlers started", WAIT, () -> handled.count() >= fast.size() + 1);
             long startedAt = System.nanoTime();
             List<String> all = new java.util.ArrayList<>(fast);
             all.addAll(slow);
@@ -243,10 +245,13 @@ class ErrorPathsIT {
                 if (r.correlationId().startsWith("slow")) {
                     assertThat(body(r, "timeout")).as(r.correlationId() + " " + r.body()).isTrue();
                 } else {
-                    assertThat(r.isErrorReply()).as(r.correlationId() + " answered normally").isFalse();
+                    assertThat(r.type()).as(r.correlationId() + " answered normally, wire type").isEqualTo("reply");
                 }
             }
             assertThat(handled.perCorrelation().values()).containsOnly(1);
+            assertThat(handled.perCorrelation().keySet().stream().filter(c -> c.startsWith("slow")))
+                    .as("only the head of the same-key chain started; the queued ones were cut by the Cycle deadline")
+                    .containsExactly("slow-0");
         }
     }
 

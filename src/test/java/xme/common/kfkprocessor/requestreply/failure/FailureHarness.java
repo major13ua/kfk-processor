@@ -208,6 +208,12 @@ public final class FailureHarness {
 
     /** Sends one request per correlation id (request key = correlation id). */
     public static void produce(String topic, List<String> correlationIds) {
+        produce(topic, correlationIds, id -> id);
+    }
+
+    /** Sends one request per correlation id, in list order, with the Request Key {@code requestKey(correlationId)}. */
+    public static void produce(String topic, List<String> correlationIds,
+            java.util.function.Function<String, String> requestKey) {
         try (var producer = new KafkaProducer<byte[], byte[]>(Map.<String, Object>of(
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName(),
@@ -222,7 +228,7 @@ public final class FailureHarness {
             for (String id : correlationIds) {
                 var rec = new ProducerRecord<byte[], byte[]>(topic, null, ("req-" + id).getBytes(StandardCharsets.UTF_8));
                 rec.headers().add(new RecordHeader("correlation_id", id.getBytes(StandardCharsets.UTF_8)));
-                rec.headers().add(new RecordHeader("request_key", id.getBytes(StandardCharsets.UTF_8)));
+                rec.headers().add(new RecordHeader("request_key", requestKey.apply(id).getBytes(StandardCharsets.UTF_8)));
                 rec.headers().add(new RecordHeader("created_at", java.time.Instant.now().toString().getBytes(StandardCharsets.UTF_8)));
                 producer.send(rec, (m, e) -> {
                     if (e != null) {

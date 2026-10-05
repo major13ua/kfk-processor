@@ -246,4 +246,64 @@ class HandlerExecutorTest {
         assertEquals(null, returned.get(), "no results (no TIMEOUT Error Replies) for an interrupted Cycle");
         assertTrue(thrown.get() instanceof CycleInterruptedException, "was " + thrown.get());
     }
+
+    // review r2 D: a graceful stop must not start the Handlers still queued behind a same-key Handler
+    @Test
+    void interruptSkipsQueuedSameKeyHandlersOfTheAbandonedCycle() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        AtomicInteger invoked = new AtomicInteger();
+        CountDownLatch firstReturned = new CountDownLatch(1);
+        var executor = executor((ctx, in) -> {
+            invoked.incrementAndGet();
+            if (in.equals("first")) {
+                entered.countDown();
+                while (!ctx.cancellation().isCancelled()) {
+                    Thread.sleep(5);
+                }
+                firstReturned.countDown();
+            }
+            return in;
+        }, Duration.ofSeconds(30));
+        Thread worker = new Thread(() -> {
+            try {
+                executor.executeCycle(List.of(req("a", 1, "same", "first"), req("a", 2, "same", "second")),
+                        LONG_DEADLINE);
+            } catch (Throwable ignored) {
+                // CycleInterruptedException expected
+            }
+        });
+        worker.start();
+        assertTrue(entered.await(5, TimeUnit.SECONDS));
+
+        worker.interrupt();
+        worker.join(5_000);
+        assertTrue(firstReturned.await(5, TimeUnit.SECONDS));
+        Thread.sleep(200); // give a wrongly dispatched second Handler time to start
+
+        assertEquals(1, invoked.get(), "the queued same-key Handler is not started after the stop");
+    }
+
+    // review r2 D: the Handler gets an unmodifiable copy of the request headers
+    @Test
+    void handlerGetsAnUnmodifiableCopyOfTheHeaders() {
+        var original = new java.util.LinkedHashMap<String, byte[]>();
+        original.put("h", new byte[] {1});
+        original.put("nullable", null);
+        var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var executor = executor((ctx, in) -> {
+            try {
+                ctx.headers().put("injected", new byte[] {2});
+            } catch (Throwable t) {
+                thrown.set(t);
+            }
+            return in;
+        }, TIMEOUT);
+
+        executor.executeCycle(List.of(new IncomingRequest("a", 3, 1, "k", "corr-1", original, "p".getBytes())),
+                LONG_DEADLINE);
+
+        assertTrue(thrown.get() instanceof UnsupportedOperationException, "was " + thrown.get());
+        assertEquals(2, original.size(), "the engine's own header map is untouched");
+        assertFalse(original.containsKey("injected"));
+    }
 }

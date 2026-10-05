@@ -12,7 +12,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 class DegradedDownstreamIT {
 
-    private static final long BUDGET = 10;
+    /** Spec section 1: budgets below 20 have no margin for the accuracy assertion. */
+    private static final long BUDGET = 20;
+    /** One Cycle lasts about the 1 s Handler timeout and takes at most the burst capacity (budget / 20 = 1). */
     private static final int N = 30;
 
     @Test
@@ -36,6 +38,7 @@ class DegradedDownstreamIT {
             assertReconciled(requested, replies);
             assertThat(replies).as("every Requester got an Error Reply naming the timeout")
                     .allSatisfy(r -> {
+                        assertThat(r.type()).isEqualTo("error_reply");
                         assertThat(r.body()).contains("\"category\":\"timeout\"");
                         assertThat(r.body()).contains("\"correlation_id\":\"" + r.correlationId() + "\"");
                         assertThat(r.requestKey()).isEqualTo(r.correlationId());

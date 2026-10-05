@@ -93,7 +93,7 @@ All under `xme.request-reply`. Brokers come from `spring.kafka.bootstrap-servers
 
 Replaceable beans: `RequestLanes`, `ReplySink`, `AllowanceStore`, `DestinationProbe`, `WorkerMetrics`, and a `Consumer<CommitRetry.Alert>` bean named `requestReplyAlertListener` (default: logs at ERROR). The Rate Budget counter is stored in Redis under `xme:request-reply:<group-id>:budget`.
 
-Startup refusals (message names the conflicting values, code in brackets): `request_reply.config.handler_missing`, `identity_missing`, `weight_not_positive`, `timeout_exceeds_cycle_deadline`, `cycle_deadline_exceeds_commit_window_share`, `request_reply.config.ssl_bundles_missing` (an SSL bundle named by the Kafka connection details is not defined), and `request_reply.config.allowance_store_missing` (no Redis URI and no `AllowanceStore` bean; present in the code, not yet listed in public-api.md).
+Startup refusals (message names the conflicting values, code in brackets; full list in [public-api.md](features/kafka-request-reply/contracts/public-api.md) section 3): `request_reply.config.handler_missing`, `request_reply.config.handler_types_unsupported`, `request_reply.config.identity_missing`, `request_reply.config.reply_destination_missing`, `request_reply.config.rate_budget_not_positive`, `request_reply.config.draw_per_round_not_positive`, `request_reply.config.lanes_missing`, `request_reply.config.lane_incomplete`, `request_reply.config.lane_name_duplicate`, `request_reply.config.lane_source_duplicate`, `request_reply.config.weight_not_positive`, `request_reply.config.timeout_exceeds_cycle_deadline`, `request_reply.config.cycle_deadline_exceeds_commit_window_share`, `request_reply.config.ssl_bundles_missing` (an SSL bundle named by the Kafka connection details is not defined), `request_reply.config.allowance_store_missing` (no Redis URI and no `AllowanceStore` bean).
 
 ## 5. Operator runbook
 
@@ -103,6 +103,7 @@ Startup refusals (message names the conflicting values, code in brackets): `requ
 - **Stable identity per replica.** `worker-identity` is the Kafka static group member id. It must be unique per replica and the same after a restart (for example the StatefulSet pod name). A restart that returns within `identity-window` (45 s, provisional) keeps its lanes and causes no reassignment.
 - **Rolling deploy:** restart one worker at a time, each returning with its own identity.
 - **Delivery requirements:** Requesters read committed replies only (section 3).
+- **Upgrading a group from a build with the eager Range assignor.** The starter now uses the `CooperativeStickyAssignor` (fixed, not configurable). Kafka can move a running group from an eager to a cooperative assignor only with a two-step rolling bounce: first every member with `[cooperative-sticky, range]`, then every member with `cooperative-sticky` only. A plain rolling restart that mixes old (Range only) and new (cooperative only) workers leaves the new ones unable to join (no common assignment protocol). Until an intermediate build exists, stop every worker of the group, then start the new build (requests wait on the platform, nothing is lost). Open point: spec §8.
 
 ### States and alerts
 
@@ -146,8 +147,6 @@ Tags are limited to `lane` and `category`.
 | `requestreply.cycle.duration` | timer |
 | `requestreply.group.membership.changes` | counter of partition assign and revoke events |
 
-`requestreply.consistency.lag.implausible` is in the code but not in the public-api.md meter table.
-
 ## 6. Known behaviours
 
 - **Rate Budget burst cap is budget/20.** The shared counter's burst capacity is `max(1, budget / 20)` (5%). This keeps any sliding second within budget x 1.10. A consequence: with slow Cycles, throughput can fall below the configured budget, because unused allowance cannot accumulate beyond the cap. Budgets under 20 keep a minimum capacity of 1.
@@ -171,4 +170,4 @@ Linked, not decided:
 - Stranded-lane alert and runbook sufficiency: spec §8 Q7.
 - Per-key ordering versus throughput: spec §8, [sad.md](features/kafka-request-reply/sad.md) §11.
 - Consistency Lag p95 target and baseline: TBD, spec §8 (last item). The metric exists; no target is set.
-- Tightening of spec AC-07c from "arrival order" to "within a lane": pending per sad.md §11.
+- Spec AC-07c is tightened to "arrival order within a lane" (2026-10-05, review r2); cross-lane order stays unguaranteed (section 3, rule 2).

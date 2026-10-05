@@ -2,7 +2,9 @@ package xme.common.kfkprocessor.requestreply.engine;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
@@ -83,8 +85,8 @@ public final class HandlerExecutor<K, REQ, RES> {
     }
 
     private void run(Slot slot, long cycleEnd) {
-        if (slot.outcome.get() != null) {
-            return; // already decided (cycle deadline): never dispatch
+        if (slot.outcome.get() != null || slot.cancelled.get()) {
+            return; // already decided (cycle deadline) or the Cycle was abandoned (graceful stop): never dispatch
         }
         slot.deadline = Math.min(System.nanoTime() + requestTimeout.toNanos(), cycleEnd);
         try {
@@ -109,7 +111,7 @@ public final class HandlerExecutor<K, REQ, RES> {
                     r.correlationId(),
                     IdempotencyKey.of(r.lane(), r.partition(), r.position()),
                     r.lane(),
-                    r.headers(),
+                    Collections.unmodifiableMap(new LinkedHashMap<>(r.headers())), // a copy: null values allowed
                     signal);
             RES data = handler.handle(ctx, decoder.apply(r));
             slot.decide(new HandlerResult<>(r, new Reply<>(r.correlationId(), key, data), null), false);

@@ -141,4 +141,16 @@ class DefaultKafkaDestinationProbeTest {
         assertEquals("SASL_SSL", created.get(0).get("security.protocol"));
         assertEquals("b:9092", created.get(0).get("bootstrap.servers"));
     }
+
+    // review r2 D: a probe against an unreachable cluster must not block on Admin close; it closes with zero wait
+    @Test
+    void adminIsClosedWithoutWaitingAfterEveryProbe() {
+        allGranted();
+        probe().probe();
+        transaction(failed(new TransactionalIdAuthorizationException("denied")));
+        assertThrows(ReplyDestinationFault.class, () -> probe().probe());
+
+        org.mockito.Mockito.verify(admin, org.mockito.Mockito.times(2)).close(java.time.Duration.ZERO);
+        org.mockito.Mockito.verify(admin, org.mockito.Mockito.never()).close();
+    }
 }

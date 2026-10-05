@@ -133,9 +133,9 @@ Decision override: Rate Budget accuracy tolerance widened from x1.05 to x1.10 (i
 **Then** the Handler is not run again by the worker, and the Requester receives the Error Reply from the first failure
 
 ### AC-07c (US-01): domain invariant
-**Given** several requests with the same Request Key are waiting in a Cycle
+**Given** several requests with the same Request Key are waiting in a Cycle in the same Priority Lane
 **When** the Handlers run
-**Then** those requests run one after another in arrival order, while requests with different Request Keys run in parallel
+**Then** those requests run one after another in their arrival order within that lane, while requests with different Request Keys, or with the same Request Key in different lanes, run in parallel; order across lanes is not guaranteed (Requesters send same-key requests to one lane; SAD §11, tightened 2026-10-05 per review r2)
 
 ### AC-08 (US-04): domain invariant
 **Given** a reply cannot be delivered for any reason specific to it (too large, cannot be encoded, rejected on send)
@@ -227,6 +227,8 @@ Provisional numbers are marked and confirmed or deferred in §8.
 | Stall detection | stall indicator when work is pending and 60 s pass without a commit (provisional) | stall-indicator metric |
 | Consistency Lag p95 | TBD, see §8 | Consistency Lag metric per lane |
 
+Measurement note (AC-12, review r2): the minimum-share check in `WeightAccuracyIT` allows 0.5 percentage points of measurement slack (minimum share 5% is asserted as ≥ 4.5%) for window-edge and per-worker rounding noise over a finite window of accepted counts; a starved lane is far below it. The ±10 pp Priority Weight accuracy assertion has no slack.
+
 ## 6.1 Security / privacy
 
 - **Data classification:** internal. Request and reply payloads belong to the owning teams and may carry confidential data; the starter does not inspect them.
@@ -268,4 +270,7 @@ Provisional numbers are marked and confirmed or deferred in §8.
 - [ ] Interrupt during Redis `reserve` on graceful stop raises a false limiter pause and alert (Intake). Default now: accepted, appears only on shutdown under load. owner: Tech Lead, due: before the first production release
 - [ ] Interrupted commit on graceful stop can leave the Kafka transaction open up to the transaction timeout (60 s), delaying `read_committed` replies on touched partitions. Default now: accepted. owner: Tech Lead, due: before the first production release
 - [x] A commit held past the commit window (= `transaction.timeout.ms`) is aborted by the broker, and kafka-clients 4.2.1 reports it as `ProducerFencedException` (INVALID_PRODUCER_EPOCH mapped to PRODUCER_FENCED), the same as a real fence. Decision 2026-10-05 (review r2 A2, F13): every fence on commit is permanent: the worker pauses with alert `request_reply.reply_destination.fenced`, never re-creates the producer or re-sends (no duplicate replies, AC-05); a worker restart recovers and re-sends the held Cycle. Unknown-outcome commits whose retry fails definitively (TRANSACTION_ABORTABLE, INVALID_TXN_STATE) and InvalidProducerEpoch on the produce path are aborted and re-sent without restart. owner: Tech Lead
+- [ ] On a real broker, a good reply that shares a producer batch with a broker-rejected reply but sits before it in the batch is demoted to an Error Reply first; the rejected reply itself is demoted only in a later round (review r2 F14 residual: one demotion per round, the broker fails the whole batch). Requesters of such good replies get an `undeliverable` Error Reply instead of their reply. Default now: accepted; fix by sending each reply in its own batch or by identifying the failing record per partition. owner: Tech Lead, due: before the first production release
+- [ ] Moving a running consumer group from the eager Range assignor (builds before F12) to the CooperativeStickyAssignor needs a two-step rolling bounce (first `[cooperative-sticky, range]`, then `cooperative-sticky` only). The starter hard-codes `cooperative-sticky`, so a plain rolling restart of a mixed group fails to join (no common assignment protocol). Default now: stop all workers of the group, then start the new build (runbook in the starter guide); no production group exists yet. owner: Tech Lead, due: before the first production release
+- [ ] `KafkaRequestLanesIT.restartWithSameIdentityWithinWindowCausesNoRebalanceForTheOtherWorker` failed once under load; unconfirmed whether related to the cooperative assignor (F12). Default now: investigate if it reproduces (F18 ran it 5 times in isolation on 2026-10-05: 5 of 5 passed, not reproduced; under full-suite load it is still unconfirmed). owner: Tech Lead, due: before the first production release
 - [ ] Full-scale load and full-time-value test runs are not configurable and the documented `loadTest` commands do not complete; ThroughputLoadIT does not assert zero Error Replies; thread-scan test in RequestReplyAutoConfigurationTest is order-dependent. Default now: reduced scale recorded in test-plan. owner: Tech Lead, due: before the first production release

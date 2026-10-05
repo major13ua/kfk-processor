@@ -2,7 +2,7 @@
 status: Draft
 owner: "QA owner (TBD)"
 reviewers: ["Ievgen Chupryna", "Tech Lead"]
-updated_at: "2026-10-04"
+updated_at: "2026-10-05"
 feature_size: "M"
 ---
 
@@ -35,13 +35,14 @@ A reusable worker starter: global Rate Budget at intake, weighted Priority Lanes
 | AC-03 idempotency key | `idempotency key is derived deterministically from request identity` | unit | Same input gives same key, different requests give different keys |
 | AC-04 happy path | `committed reply echoes correlation identifier and request key` | contract | Reply record matches contract and echoes both values unchanged |
 | AC-05 domain invariant | `cycle repeated after failure shows one committed reply per request attempt` | integration | Reader of committed replies sees exactly one reply per attempt |
-| AC-05 domain invariant | `a new attempt by the requester is treated as a new request` | integration | Second attempt gets its own reply |
+| AC-05 domain invariant | `a new attempt by the requester is treated as a new request` | integration | Second attempt gets its own reply and its own Idempotency Key (`RequestAttemptsAndKeyOrderIT`) |
+| AC-05 domain invariant | `unknown commit outcome is resolved without a duplicate or lost reply` | integration | Covered on a real broker by `KafkaReplySinkTransactionTimeoutIT` (F13: real sink, outage longer than the transaction timeout); `FailureHarness`/`FaultInjection` re-implement the sink's resolution and are kept only as a scenario check |
 | AC-06 error | `handler failure yields error reply with failure category, others unaffected` | e2e + unit | Failing request gets Error Reply naming the category, siblings get normal replies |
 | AC-07 error | `handler exceeding timeout yields timeout error reply and is cancelled` | e2e + unit | Timeout Error Reply, cancel signal delivered to Handler, Cycle ends within its deadline |
 | AC-07 error | `timeout timer starts at dispatch, not at intake` | unit | Queued request waiting for a slot is not timed out before dispatch |
 | AC-07b error | `failed or timed out handler is not run again` | integration | Handler invoked once, Requester holds the Error Reply from the first failure |
-| AC-07c domain invariant | `same request key runs in arrival order, other keys in parallel` | unit | Per-key sequence preserved, different keys overlap in time |
-| AC-07c domain invariant | `ordering per key holds across a full cycle on the real platform` | integration | Replies and Handler start order for one key match arrival order |
+| AC-07c domain invariant | `same request key runs in arrival order, other keys in parallel` | unit | Per-key sequence preserved within a lane, different keys overlap in time; same key in two lanes is independent |
+| AC-07c domain invariant | `ordering per key holds across a full cycle on the real platform` | integration | Replies and Handler start order for one key match arrival order within the lane, no same-key overlap, other keys in parallel (`RequestAttemptsAndKeyOrderIT`, runs in `test`; the hot-key phase of the `load`-tagged `ThroughputLoadIT` checks it again at load) |
 | AC-08 domain invariant | `oversized reply becomes error reply and cycle handlers are not re-run` | integration | Requester gets undeliverable Error Reply, other replies committed, Handlers not repeated |
 | AC-08 domain invariant | `reply that cannot be encoded becomes error reply` | integration | Same outcome as oversized |
 | AC-08 domain invariant | `reply rejected on send becomes error reply` | integration | Same outcome, no replay of the Cycle |
@@ -49,13 +50,13 @@ A reusable worker starter: global Rate Budget at intake, weighted Priority Lanes
 | AC-09 authorization | `missing write permission on reply destination at startup stops intake` | integration | Configuration fault reported, no request accepted, no request lost, stays in group |
 | AC-09 authorization | `permission revoked mid-cycle pauses without re-running handlers` | integration | Cycle in progress not re-executed, worker pauses and shows paused state |
 | AC-09 authorization | `permission restored resumes intake automatically` | integration | Intake resumes with no restart, no lane reassignment |
-| AC-10 happy path | `accepted requests across workers stay within budget in any one-second window` | integration + load | Max accepted in any sliding second at most budget x 1.10 (Tech Lead, 2026-10-05); budgets of 20 or more |
+| AC-10 happy path | `accepted requests across workers stay within budget in any one-second window` | integration + load | Max accepted in any sliding second at most budget x 1.10 (Tech Lead, 2026-10-05); budgets of 20 or more; measured on the `requestreply.accepted` metric summed over workers (spec §6), Handler starts asserted too |
 | AC-10 happy path | `request counts as accepted when handed to a handler` | unit | One allowance unit taken at intake, when the request is handed over to the Handler stage; not for malformed or oversized requests |
 | AC-10b domain invariant | `no allowance leaves requests unconsumed and unanswered` | integration | Remaining requests stay on the platform, no reply, picked up by a later Cycle |
 | AC-10b domain invariant | `malformed or oversized request gets error reply without using allowance` | unit + integration | Error Reply sent, allowance counter unchanged |
 | AC-11 happy path | `lane shares match weights when all lanes are busy` | unit + load | Each lane within 10 percentage points of its effective share |
-| AC-12 domain invariant | `low-weight lane keeps at least its minimum share under heavy neighbours` | unit + integration | Lane served at 5 percent minimum, requests keep flowing |
-| AC-13 domain invariant | `slow handler on low-weight lane does not hold requests past cycle deadline` | e2e | No request waits longer than the deadline, unfinished requests get Error Replies |
+| AC-12 domain invariant | `low-weight lane keeps at least its minimum share under heavy neighbours` | unit + integration | Lane served at 5 percent minimum, requests keep flowing; `WeightAccuracyIT` asserts the minimum with 0.5 pp measurement slack (≥ 4.5%, spec §6 note), ±10 pp with none |
+| AC-13 domain invariant | `slow handler on low-weight lane does not hold requests past cycle deadline` | e2e | No request waits longer than the deadline, unfinished requests get Error Replies; the slow requests share one Request Key so the queued ones are ended by the Cycle-deadline cut, never dispatched |
 | AC-14 happy path | `rolling restart with returning identity causes no lane reassignment` | integration | Group membership change counter stays 0, other workers keep consuming |
 | AC-15 error | `worker without explicit identity refuses to start` | unit | Refused, message explains a stable identity is required |
 | AC-16 happy path | `consistency lag recorded per committed reply and per lane` | contract + integration | Metric present for every committed reply, labelled by lane |
@@ -63,17 +64,17 @@ A reusable worker starter: global Rate Budget at intake, weighted Priority Lanes
 | AC-17 error | `idle worker raises no stall` | unit | No pending work, no indicator |
 | AC-17 error | `pause shows its own state and suppresses stall` | unit | Paused state shown, stall indicator off |
 | AC-18 cross-context | `allowance store outage stops intake and resumes without exceeding budget` | integration | Intake stops, worker stays in group, paused state shown, resumes on return, no burst above budget |
-| AC-19 cross-context | `degraded downstream yields timeout error replies at bounded rate` | e2e | Requesters get Error Replies, accepted rate stays within budget, no worker retry |
+| AC-19 cross-context | `degraded downstream yields timeout error replies at bounded rate` | e2e | Requesters get Error Replies, accepted rate stays within budget (budget 20, the smallest allowed for the accuracy assertion), no worker retry |
 
 ## Edge cases / error paths
 
 - Request with no correlation identifier → expected: Error Reply for a malformed request, no allowance used, worker keeps running.
-- Request with no Request Key → expected: handled as its own key, runs in parallel with others.
+- Request with no Request Key → expected: Error Reply for a malformed request, no allowance used, Handler not run (contract events.md, `KafkaRequestLanes`, unit test).
 - Weight that normalises below 5 percent → expected: lane raised to the minimum, others scaled down.
 - Single lane configured → expected: lane gets the whole budget.
 - Idle lane → expected: its share is redistributed to busy lanes (per open question default).
 - Worker killed mid-Cycle before commit → expected: Cycle replayed on restart, no duplicated committed reply, same Idempotency Key.
-- Worker killed after commit but before next fetch → expected: no replay, no duplicate.
+- Worker killed after commit but before next fetch → expected: no replay, no duplicate (`WorkerKilledMidCycleIT.killedAfterCommitBeforeNextFetchIsNotReplayedAfterRestart`: SIGKILL once the Cycle's replies are committed and the lane holds nothing newer; the restarted worker handles only a new request).
 - Commit fails as a whole (transaction aborted) → expected: no Handler re-run, outcome reconciled per request, zero lost or duplicated committed replies.
 - Allowance returned for unconsumed requests (ADR-0006) → expected: counter restored, no leak of budget over time.
 - Allowance store returns after outage with stale counter → expected: no burst above budget.

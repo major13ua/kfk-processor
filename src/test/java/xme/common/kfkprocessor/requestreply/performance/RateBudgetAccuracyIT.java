@@ -90,6 +90,8 @@ class RateBudgetAccuracyIT {
                 }));
             }
             await("backlog drained", Duration.ofSeconds(120 + 2 * N / BUDGET), () -> distinct.size() >= N);
+            await("intake sampler caught up with the accepted metric", Duration.ofSeconds(10),
+                    () -> intakeTimes.size() >= N);
         } finally {
             sampler.interrupt();
             workers.forEach(Worker::close);
@@ -99,11 +101,16 @@ class RateBudgetAccuracyIT {
         synchronized (intakeTimes) {
             intake = new ArrayList<>(intakeTimes);
         }
-        System.out.println("[T17 AC-10] restart=" + restartOne + " diagnostic: max in any sliding 1 s measured at intake (allowance taken)="
-                + maxInAnySecond(intake) + " of " + intake.size() + " units");
+        int allowed = (int) Math.floor(BUDGET * BUDGET_TOLERANCE);
+        int maxAtIntake = maxInAnySecond(intake);
+        System.out.println("[T17 AC-10] restart=" + restartOne + " max in any sliding 1 s measured at intake"
+                + " (requestreply.accepted)=" + maxAtIntake + " of " + intake.size() + " units, allowed=" + allowed);
+        // spec section 6 / SAD: Rate Budget accuracy is measured on the worker "accepted" metric (counted at intake)
+        assertThat(intake).as("accepted metric covers the whole backlog").hasSizeGreaterThanOrEqualTo(N);
+        assertThat(maxAtIntake).as("most requests counted by the requestreply.accepted metric (all workers) in any"
+                + " sliding 1 s window (budget " + BUDGET + " x " + BUDGET_TOLERANCE + ")").isLessThanOrEqualTo(allowed);
         List<Long> times = starts.sorted();
         int max = maxInAnySecond(times);
-        int allowed = (int) Math.floor(BUDGET * BUDGET_TOLERANCE);
         System.out.println("[T17 AC-10] restart=" + restartOne + " budget=" + BUDGET + "/s workers=" + WORKERS + " handled=" + times.size()
                 + " max in any sliding 1 s=" + max + " allowed=" + allowed + " perSecond=" + perSecond(times));
         assertThat(max).as("most requests handed to a Handler in any sliding 1 s window (budget " + BUDGET

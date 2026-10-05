@@ -382,4 +382,17 @@ class KafkaReplySinkTest {
         assertEquals("b:9092", out.get("bootstrap.servers"));
         assertEquals(KafkaReplySink.transactionalId("grp", "worker-1"), out.get("transactional.id"));
     }
+
+    // review r2 D: the client-side size pre-check uses the configured max.request.size, not the client default
+    @Test
+    void sizePreCheckLimitIsTheConfiguredMaxRequestSize() {
+        var props = new xme.common.kfkprocessor.requestreply.api.RequestReplyProperties();
+        props.setWorkerIdentity("worker-1");
+        assertEquals(2000, KafkaReplySink.maxRecordBytes(KafkaReplySink.producerProperties(props,
+                Map.of("bootstrap.servers", "b:9092", "max.request.size", "2000"), "grp")));
+        assertEquals(3000, KafkaReplySink.maxRecordBytes(KafkaReplySink.producerProperties(props,
+                Map.of("bootstrap.servers", "b:9092", "max.request.size", 3000), "grp")));
+        assertEquals(1048576, KafkaReplySink.maxRecordBytes(KafkaReplySink.producerProperties(props,
+                Map.of("bootstrap.servers", "b:9092"), "grp")), "client default when not configured");
+    }
 }

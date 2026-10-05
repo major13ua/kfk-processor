@@ -1,5 +1,6 @@
 package xme.common.kfkprocessor.requestreply.autoconfig;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -45,7 +46,8 @@ final class DefaultKafkaDestinationProbe implements DestinationProbe {
 
     @Override
     public void probe() {
-        try (Admin admin = adminFactory.apply(clientProperties)) {
+        Admin admin = adminFactory.apply(clientProperties);
+        try {
             List<String> topics = new ArrayList<>();
             topics.add(topic);
             topics.addAll(laneSources);
@@ -64,6 +66,8 @@ final class DefaultKafkaDestinationProbe implements DestinationProbe {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ReplyDestinationFault.Unavailable("interrupted", e);
+        } finally {
+            admin.close(Duration.ZERO); // the answers are in: do not wait on an unreachable cluster while closing
         }
     }
 
