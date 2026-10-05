@@ -8,9 +8,12 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.Config;
+import org.apache.kafka.clients.admin.ConfigEntry;
 import org.apache.kafka.clients.admin.DescribeTopicsOptions;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.acl.AclOperation;
+import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.AuthorizationException;
 import xme.common.kfkprocessor.requestreply.ports.DestinationProbe;
 import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
@@ -59,6 +62,7 @@ final class DefaultKafkaDestinationProbe implements DestinationProbe {
                 require(described.get(source), AclOperation.READ, "request lane '" + source + "'");
             }
             checkTransactionalId(admin);
+            checkNotCompacted(admin);
         } catch (ExecutionException e) {
             throw fault(e.getCause(), topic, laneSources);
         } catch (TimeoutException e) {
@@ -93,6 +97,24 @@ final class DefaultKafkaDestinationProbe implements DestinationProbe {
                         "no permission on the transactional id '" + transactionalId + "'", e.getCause());
             }
             // unknown id, or a broker that cannot describe transactions: the first commit finds out
+        }
+    }
+
+    /** Reply records are keyless, a compacted topic rejects them all. Best effort: an unreadable config never refuses. */
+    private void checkNotCompacted(Admin admin) throws InterruptedException {
+        ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, topic);
+        Config config;
+        try {
+            config = admin.describeConfigs(List.of(resource)).values().get(resource)
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (ExecutionException | TimeoutException | RuntimeException e) {
+            return;
+        }
+        ConfigEntry policy = config == null ? null : config.get("cleanup.policy");
+        if (policy != null && policy.value() != null && policy.value().contains("compact")) {
+            throw new ReplyDestinationFault.Invalid("reply destination '" + topic + "' is compacted (cleanup.policy="
+                    + policy.value() + "), reply records are keyless and would all be rejected"
+                    + " [request_reply.config.reply_destination_compacted]", null);
         }
     }
 

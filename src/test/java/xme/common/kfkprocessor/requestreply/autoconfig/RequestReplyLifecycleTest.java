@@ -83,13 +83,29 @@ class RequestReplyLifecycleTest {
                     "invalid topic name 'bad topic' [request_reply.config.reply_destination_invalid]", null);
         }, state, a -> { }, Duration.ofMillis(200), true);
 
+        java.util.Set<Thread> before = loopThreads();
         RuntimeException e = org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, lifecycle::start);
         assertTrue(e.getMessage().contains("request_reply.config."), e.getMessage());
         assertTrue(e.getMessage().contains("bad topic"), e.getMessage());
         assertTrue(!lifecycle.isRunning(), "not running after a refused start");
-        Thread.sleep(300);
+        // CycleLoop.start() spawns these two threads synchronously and (with the null intake) the loop thread keeps
+        // living on its idle backoff, so a started loop is observable right here without waiting
+        java.util.Set<Thread> started = loopThreads();
+        started.removeAll(before);
+        assertTrue(started.isEmpty(), "a refused start must not start the loop, new threads: " + started);
         assertEquals(0, lanes.fetches.get(), "loop never fetched");
         assertEquals(0, lanes.keepAlives.get(), "no permission gate keep-alive");
+    }
+
+    private static java.util.Set<Thread> loopThreads() {
+        java.util.Set<Thread> found = new java.util.HashSet<>();
+        for (Thread t : Thread.getAllStackTraces().keySet()) {
+            if (t.getName().equals("request-reply-cycle-loop") || t.getName().equals("request-reply-stall-watchdog")
+                    || t.getName().equals("request-reply-permission-gate")) {
+                found.add(t);
+            }
+        }
+        return found;
     }
 
     private static void waitFor(String what, Duration timeout, java.util.function.BooleanSupplier condition)

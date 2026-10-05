@@ -41,4 +41,20 @@ class DefaultKafkaDestinationProbeIT {
         assertInstanceOf(ReplyDestinationFault.Unavailable.class,
                 assertThrows(ReplyDestinationFault.class, probe::probe));
     }
+
+    @Test
+    void aCompactedReplyTopicIsInvalid() throws Exception {
+        String id = UUID.randomUUID().toString().substring(0, 8);
+        Map<String, Object> client = Map.of("bootstrap.servers", kafka.getBootstrapServers());
+        try (Admin admin = Admin.create(client)) {
+            admin.createTopics(List.of(
+                    new NewTopic("rep-" + id, 1, (short) 1).configs(Map.of("cleanup.policy", "compact")),
+                    new NewTopic("lane-" + id, 1, (short) 1))).all().get();
+        }
+        var probe = new DefaultKafkaDestinationProbe(client, "rep-" + id, List.of("lane-" + id), "txn-" + id);
+        ReplyDestinationFault e = assertThrows(ReplyDestinationFault.class, probe::probe);
+        assertInstanceOf(ReplyDestinationFault.Invalid.class, e);
+        org.junit.jupiter.api.Assertions.assertTrue(
+                e.getMessage().contains("request_reply.config.reply_destination_compacted"), e.getMessage());
+    }
 }

@@ -14,6 +14,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.Config;
+import org.apache.kafka.clients.admin.ConfigEntry;
+import org.apache.kafka.clients.admin.DescribeConfigsResult;
 import org.apache.kafka.clients.admin.DescribeTopicsOptions;
 import org.apache.kafka.clients.admin.DescribeTopicsResult;
 import org.apache.kafka.clients.admin.DescribeTransactionsResult;
@@ -21,6 +24,7 @@ import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.admin.TransactionDescription;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.acl.AclOperation;
+import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.TransactionalIdAuthorizationException;
 import org.apache.kafka.common.errors.TransactionalIdNotFoundException;
 import org.apache.kafka.common.internals.KafkaFutureImpl;
@@ -75,7 +79,22 @@ class DefaultKafkaDestinationProbeTest {
         return f;
     }
 
+    /** A real result object (values() and all() both work), so the test does not pin which accessor the probe uses. */
+    private void cleanupPolicy(KafkaFuture<Config> outcome) {
+        Map<ConfigResource, KafkaFuture<Config>> m = Map.of(new ConfigResource(ConfigResource.Type.TOPIC, REPLIES),
+                outcome);
+        DescribeConfigsResult r = new DescribeConfigsResult(m) { };
+        when(admin.describeConfigs(any(java.util.Collection.class))).thenReturn(r);
+        when(admin.describeConfigs(any(java.util.Collection.class),
+                any(org.apache.kafka.clients.admin.DescribeConfigsOptions.class))).thenReturn(r);
+    }
+
+    private void cleanupPolicy(String policy) {
+        cleanupPolicy(KafkaFuture.completedFuture(new Config(List.of(new ConfigEntry("cleanup.policy", policy)))));
+    }
+
     private void allGranted() {
+        cleanupPolicy("delete");
         topics(topic(REPLIES, AclOperation.WRITE, AclOperation.DESCRIBE),
                 topic("lane-high", AclOperation.READ, AclOperation.DESCRIBE),
                 topic("lane-low", AclOperation.READ, AclOperation.DESCRIBE));
@@ -197,5 +216,58 @@ class DefaultKafkaDestinationProbeTest {
         RuntimeException e = assertThrows(ReplyDestinationFault.Invalid.class, () -> probe().probe());
         assertTrue(e.getMessage().contains("request_reply.config."), e.getMessage());
         assertTrue(e.getMessage().contains(REPLIES), e.getMessage());
+    }
+
+    // F33 / review r5 R5: reply records are keyless, a compacted topic rejects every one of them
+    @Test
+    void compactedReplyTopicIsInvalidNamingConfigCodeAndTopic() {
+        allGranted();
+        cleanupPolicy("compact");
+        ReplyDestinationFault e = assertThrows(ReplyDestinationFault.class, () -> probe().probe());
+        assertInstanceOf(ReplyDestinationFault.Invalid.class, e);
+        assertTrue(e.getMessage().contains("request_reply.config.reply_destination_compacted"), e.getMessage());
+        assertTrue(e.getMessage().contains(REPLIES), e.getMessage());
+    }
+
+    @Test
+    void compactAndDeleteReplyTopicIsAlsoInvalid() {
+        allGranted();
+        cleanupPolicy("compact,delete");
+        ReplyDestinationFault e = assertThrows(ReplyDestinationFault.class, () -> probe().probe());
+        assertInstanceOf(ReplyDestinationFault.Invalid.class, e);
+        assertTrue(e.getMessage().contains("request_reply.config.reply_destination_compacted"), e.getMessage());
+    }
+
+    @Test
+    void deleteCleanupPolicyIsNotRefusedAndConfigWasDescribed() {
+        allGranted();
+        cleanupPolicy("delete");
+        assertDoesNotThrow(() -> probe().probe());
+        assertConfigDescribed();
+    }
+
+    // a config describe that fails (e.g. no DESCRIBE_CONFIGS ACL) is never reported as "compacted"
+    @Test
+    void failedConfigDescribeIsNotMisreportedAsCompacted() {
+        allGranted();
+        KafkaFutureImpl<Config> f = new KafkaFutureImpl<>();
+        f.completeExceptionally(new org.apache.kafka.common.errors.TopicAuthorizationException("no describe configs"));
+        cleanupPolicy(f);
+        RuntimeException thrown = null;
+        try {
+            probe().probe();
+        } catch (RuntimeException e) {
+            thrown = e;
+        }
+        assertTrue(thrown == null || !(thrown instanceof ReplyDestinationFault.Invalid),
+                "not Invalid/compacted: " + thrown);
+        assertConfigDescribed();
+    }
+
+    /** Either describeConfigs overload satisfies the seam. */
+    private void assertConfigDescribed() {
+        assertTrue(org.mockito.Mockito.mockingDetails(admin).getInvocations().stream()
+                .anyMatch(i -> i.getMethod().getName().equals("describeConfigs")),
+                "the probe must describe the reply topic's configs");
     }
 }
