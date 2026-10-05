@@ -65,3 +65,13 @@
 | F23 | Dropped-reply alert has non-pause kind; Consistency Lag skips keyed by lane:partition:position; engine test gaps (Group C engine, Group D code) | done |
 | F24 | Close review r3 Group C test gaps (AC-19 degraded IT, multi-partition ITs, autoconfig codes, mid-batch reject, lifecycle waits) | done |
 | F25 | Docs and spec: AC-08b amendment, section 8 items, guide/test-plan/contracts corrections (r3 Group A spec change, Group D docs) | done |
+
+## Review follow-ups round 4 (from `_review/review-2026-10-05-r4.md`)
+
+| # | Task | Status |
+|---|---|---|
+| F26 | Engine: keep-alive failure hand-back, budget units kept once Handlers ran, lag over committed only, tick() membership test (S1-S3, T2-T4) | todo |
+| F27 | Startup: lane source validation, probe/lifecycle Invalid tests (T1) | todo |
+| F28 | Sink: wrapped CommitFailed, mid-batch reject IT rework, Alert.reason null note (T5, S5) | todo |
+| F29 | Test hardening (stage-2 test items) | todo |
+| F30 | Docs: fenced wording, runbook, test-plan, section 8 deferral (S4) | todo |

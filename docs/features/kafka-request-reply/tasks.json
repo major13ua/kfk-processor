@@ -788,6 +788,100 @@
         "docs/features/kafka-request-reply"
       ],
       "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r3.md"
+    },
+    {
+      "id": "F26",
+      "title": "Engine: keep-alive failure in membership retry hands requests back (S1,T4); hand-back keeps Rate Budget units once Handlers ran and debounces cycle.failed (S2,T3); Consistency Lag only for committed replies (S3); tick() membership branch test (T2)",
+      "layer": "engine",
+      "deps": [
+        "F25"
+      ],
+      "acs": [
+        "AC-09",
+        "AC-10",
+        "AC-19",
+        "AC-16",
+        "AC-17"
+      ],
+      "dod": "RED tests first: CycleLoopTest keep-alive throws during membership retry -> released + cycle.failed; IntakeTest abandon give-back (dispatched vs not, release throws); lag only over committed subset; CommitRetryTest tick() membership branch. Gate green.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/engine",
+        "src/test/java/xme/common/kfkprocessor/requestreply/engine"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r4.md"
+    },
+    {
+      "id": "F27",
+      "title": "Startup: validate lane source names (lane_source_invalid), probe Invalid names topic with config code, lifecycle refuses start on Invalid; tests assert exact code and type (T1)",
+      "layer": "autoconfig",
+      "deps": [
+        "F26"
+      ],
+      "acs": [
+        "AC-02",
+        "AC-09"
+      ],
+      "dod": "RED tests first: StartupValidatorTest lane source invalid with exact code; DefaultKafkaDestinationProbeTest asserts Invalid type; RequestReplyLifecycleTest start throws, not running, loop never started. Contract lists new code.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/autoconfig",
+        "src/test/java/xme/common/kfkprocessor/requestreply/autoconfig"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r4.md"
+    },
+    {
+      "id": "F28",
+      "title": "Sink: wrapped CommitFailedException case (T5); rework mid-batch reject IT with per-record broker validation failure and align spec section 8 wording (S5); Alert.reason() null documented",
+      "layer": "adapters",
+      "deps": [
+        "F27"
+      ],
+      "acs": [
+        "AC-08",
+        "AC-08b"
+      ],
+      "dod": "RED tests first: KafkaReplySinkTest wrapped KafkaException(cause CommitFailedException) classified as membership change; KafkaReplySinkIT mid-batch reject via INVALID_RECORD path with deterministic assertions. public-api.md notes null reason.",
+      "files_hint": [
+        "src/main/java/xme/common/kfkprocessor/requestreply/adapters/kafka",
+        "src/test/java/xme/common/kfkprocessor/requestreply/adapters/kafka"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r4.md"
+    },
+    {
+      "id": "F29",
+      "title": "Test hardening: DegradedDownstreamIT span-normalised rate bound, RebalanceWhileHeldIT condition wait, buffer-bound IT tight bound and partitions asserted, TransactionTimeoutIT javadoc",
+      "layer": "test",
+      "deps": [
+        "F28"
+      ],
+      "acs": [
+        "AC-19",
+        "AC-10b",
+        "AC-08b",
+        "AC-17"
+      ],
+      "dod": "Tests deterministic, bounds tightened, none weakened; full suite green.",
+      "files_hint": [
+        "src/test/java/xme/common/kfkprocessor/requestreply"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r4.md"
+    },
+    {
+      "id": "F30",
+      "title": "Docs: AC-08b fenced wording vs section 8 A1 and guide runbook line (S4), test-plan rows, section 8 deferral of rebalance-during-commit IT",
+      "layer": "docs",
+      "deps": [
+        "F29"
+      ],
+      "acs": [
+        "AC-08b",
+        "AC-19"
+      ],
+      "dod": "Guide, SAD, events.md, public-api, test-plan, spec section 8 consistent with code after F26-F29.",
+      "files_hint": [
+        "docs/features/kafka-request-reply",
+        "docs/kafka-request-reply-starter-guide.md"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r4.md"
     }
   ]
 }
