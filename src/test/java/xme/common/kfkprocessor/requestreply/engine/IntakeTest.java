@@ -100,6 +100,10 @@ class IntakeTest {
         }
 
         @Override public void release(List<IncomingRequest> requests) { released.addAll(requests); }
+        /** Requests whose partition the fake reports revoked since they were fetched (identity). */
+        final java.util.Set<IncomingRequest> revoked =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        @Override public boolean revokedSinceFetch(IncomingRequest request) { return revoked.contains(request); }
         @Override public void pause() { pauses++; }
         @Override public void resume() { resumes++; }
     }
@@ -358,5 +362,24 @@ class IntakeTest {
         }
         List<Long> offsets = lanes.released.stream().map(IncomingRequest::position).toList();
         assertEquals(List.of(10L, 11L, 12L, 13L, 14L, 15L, 16L), offsets, "released in fetch (offset) order, not accepted-then-malformed");
+    }
+
+    // review r2 A1 (F12): a rebalance inside the intake polls revokes partitions of requests already fetched; they
+    // must not enter the Cycle (their positions are re-read or owned elsewhere) and their units go back
+    @Test
+    void requestsOfAPartitionRevokedDuringIntakeAreDroppedAndTheirUnitsReturned() {
+        backlog("high", 3);
+        IncomingRequest malformed = new IncomingRequest("high", 0, seq++, null, "corr-m", Map.of(), new byte[1]);
+        lanes.waiting.get("high").add(malformed);
+        IncomingRequest stale = lanes.waiting.get("high").get(1);
+        lanes.revoked.add(stale);
+        lanes.revoked.add(malformed);
+
+        IntakeResult r = intake.intake();
+
+        assertEquals(2, r.accepted().size());
+        assertTrue(r.accepted().stream().noneMatch(q -> q == stale), "revoked request dropped");
+        assertTrue(r.immediateErrors().isEmpty(), "revoked malformed request dropped too");
+        assertEquals(DRAW - 2, store.returned, "units of dropped requests returned");
     }
 }

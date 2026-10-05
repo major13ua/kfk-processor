@@ -195,6 +195,23 @@ class KafkaReplySinkRecoveryTest {
         assertEquals(1, p.history().size(), "the reply was committed exactly once");
     }
 
+    // review r2 A1 (F12): while held after a commit timeout, a rebalance revokes one partition and the engine drops
+    // its results; the retry with the rest is still the same commit and must not send the retained replies again
+    @Test
+    void retryOfATimedOutCycleWithRevokedPartitionsDroppedDoesNotCommitTheRestTwice() {
+        var p = new Txn();
+        p.timeoutOnFirstCommit = true;
+        var sink = sink(p);
+        ReplyRecord retained = reply(1, "c-1", b("a"), false, null);
+        ReplyRecord revoked = new ReplyRecord("high", 1, 7, "c-2", "key-c-2", b("b"), false, null);
+
+        assertThrows(ReplyDestinationFault.class, () -> sink.commit(List.of(retained, revoked)));
+        CommitResult second = sink.commit(List.of(retained));
+
+        assertTrue(second.failures().isEmpty());
+        assertEquals(2, p.history().size(), "the first commit went through; nothing was sent again");
+    }
+
     // A2 / AC-05: a fenced producer means a newer instance owns the transactional id; re-creating the producer
     // would fence that live instance in turn.
     @Test

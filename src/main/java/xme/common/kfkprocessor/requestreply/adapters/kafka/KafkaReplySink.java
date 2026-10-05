@@ -166,11 +166,15 @@ public class KafkaReplySink implements ReplySink, AutoCloseable {
             if (pendingCycle != null) {
                 p.commitTransaction(); // resolves the commit that timed out; throws again while still unknown
                 CommitResult done = pendingResult;
-                boolean sameCycle = pendingCycle.equals(cycleId(replies));
+                List<String> cycle = cycleId(replies);
+                // the same Cycle, or what is left of it after results of revoked partitions were dropped while held
+                boolean covered = pendingCycle.containsAll(cycle);
                 pendingCycle = null;
                 pendingResult = null;
-                if (sameCycle) {
-                    return done;
+                if (covered) {
+                    return new CommitResult(done.failures().stream()
+                            .filter(f -> cycle.contains(f.lane() + ":" + f.partition() + ":" + f.position()))
+                            .toList());
                 }
             }
             return transact(p, replies);

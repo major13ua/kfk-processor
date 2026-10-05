@@ -64,8 +64,18 @@ class CycleLoopTest {
         int fetches;
         int keepAlives;
         RuntimeException denied;
+        /** Requests the fake reports revoked since fetch (identity); set by {@link #onKeepAlive}. */
+        final java.util.Set<IncomingRequest> revoked =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        Runnable onKeepAlive = () -> { };
+        final List<List<IncomingRequest>> committedAfterHold = new ArrayList<>();
+        @Override public boolean revokedSinceFetch(IncomingRequest request) { return revoked.contains(request); }
+        @Override public void committedAfterHold(List<IncomingRequest> requests) {
+            committedAfterHold.add(List.copyOf(requests));
+        }
         @Override public void keepAlive() {
             keepAlives++;
+            onKeepAlive.run();
             if (denied != null) {
                 throw denied;
             }
@@ -504,6 +514,51 @@ class CycleLoopTest {
         assertTrue(sink.commits.isEmpty(), "nothing committed: the request is redelivered");
         assertTrue(metrics.errorReplies.isEmpty(), "no TIMEOUT Error Reply");
         assertTrue(alerts.isEmpty());
+        assertEquals(null, state.pauseReason());
+        assertFalse(retry.holding());
+    }
+
+    // review r2 A1 (F12): a keep-alive poll while held can rebalance; results of partitions revoked meanwhile must
+    // not be committed (re-read after the reset, or answered by the new owner), the rest commits and the lanes are
+    // told so they read past it
+    @Test
+    void heldResultsOfAPartitionRevokedWhileHeldAreDroppedAndTheRestCommits() {
+        IncomingRequest kept = reqText("high", "a");
+        IncomingRequest stale = new IncomingRequest("high", 1, seq++, "key-s", "corr-s", Map.of(),
+                "b".getBytes(StandardCharsets.UTF_8));
+        lanes.waiting.add(kept);
+        lanes.waiting.add(stale);
+        sink.failWith = new ReplyDestinationFault.Unavailable("down", null);
+        CycleLoop<String, String, String> loop = loop(Duration.ofSeconds(5));
+        assertEquals(CycleLoop.Iteration.HELD, loop.runOnce());
+
+        lanes.onKeepAlive = () -> lanes.revoked.add(stale);
+        sink.failWith = null;
+        clock.advance(PROBE.plusSeconds(1));
+        assertEquals(CycleLoop.Iteration.COMMITTED, loop.runOnce());
+
+        assertEquals(1, sink.commits.size());
+        assertEquals(List.of(kept.correlationId()), sink.commits.get(0).stream().map(ReplyRecord::correlationId).toList());
+        assertEquals(List.of(List.of(kept)), lanes.committedAfterHold);
+        assertEquals(null, state.pauseReason());
+    }
+
+    // review r2 A1 (F12): every held result revoked: nothing to commit, the worker resumes once the probe passes
+    @Test
+    void heldCycleWhosePartitionsAreAllRevokedResumesWithoutACommit() {
+        IncomingRequest stale = reqText("high", "a");
+        lanes.waiting.add(stale);
+        sink.failWith = new ReplyDestinationFault.Unavailable("down", null);
+        CycleLoop<String, String, String> loop = loop(Duration.ofSeconds(5));
+        assertEquals(CycleLoop.Iteration.HELD, loop.runOnce());
+
+        lanes.onKeepAlive = () -> lanes.revoked.add(stale);
+        sink.failWith = null;
+        clock.advance(PROBE.plusSeconds(1));
+        loop.runOnce();
+
+        assertTrue(sink.commits.isEmpty(), "nothing committed for a revoked partition");
+        assertEquals(1, probe.calls, "resume stays probe-gated");
         assertEquals(null, state.pauseReason());
         assertFalse(retry.holding());
     }

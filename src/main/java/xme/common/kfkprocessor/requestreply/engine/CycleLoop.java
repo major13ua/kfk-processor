@@ -160,11 +160,17 @@ public final class CycleLoop<K, REQ, RES> {
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "Keep-alive poll failed: " + e.getClass().getName());
         }
+        // the keep-alive poll may have rebalanced: results of revoked partitions are re-read from the committed
+        // offset or answered by their new owner, so they must not be committed (live group metadata would accept it)
+        retry.dropHeld(r -> intake.revokedSinceFetch(r.request()));
         List<HandlerResult<K, RES>> held = retry.heldResults();
         Optional<CommitResult> out = retry.tick();
         if (out.isPresent()) {
             state.setPendingWork(false);
-            recordLag(held, out.get());
+            if (held != null && !held.isEmpty()) {
+                intake.committedAfterHold(held.stream().map(HandlerResult::request).toList());
+            }
+            recordLag(held == null ? List.of() : held, out.get());
             return Iteration.COMMITTED;
         }
         return Iteration.PAUSED;

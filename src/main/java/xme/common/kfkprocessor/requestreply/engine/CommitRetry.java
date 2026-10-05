@@ -79,6 +79,16 @@ public final class CommitRetry<K, RES> {
         return held;
     }
 
+    /**
+     * Removes held results matching {@code stale} (their partition was revoked while held). A Cycle left empty
+     * stays held until the probe passes, then resumes without a commit.
+     */
+    public synchronized void dropHeld(java.util.function.Predicate<HandlerResult<K, RES>> stale) {
+        if (held != null && held.stream().anyMatch(stale)) {
+            held = held.stream().filter(stale.negate()).toList();
+        }
+    }
+
     /** An interrupt is a graceful stop, not a destination fault: leave the Cycle uncommitted, no pause, no alert. */
     private static void abandonIfInterrupted(RuntimeException cause) {
         if (Thread.currentThread().isInterrupted()) {
@@ -109,8 +119,11 @@ public final class CommitRetry<K, RES> {
         lastProbe = now;
         try {
             probe.probe();
-            commitAttempted();
-            CommitResult out = committer.commit(held);
+            CommitResult out = new CommitResult(List.of());
+            if (!held.isEmpty()) {
+                commitAttempted();
+                out = committer.commit(held);
+            }
             state.resume(heldReason);
             state.commitSucceeded();
             held = null;

@@ -18,6 +18,7 @@ import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.AuthorizationException;
@@ -52,6 +53,11 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
      * (burst-capped rate budget) does not cost a re-fetch per round. Dropped for revoked partitions.
      */
     private final List<IncomingRequest> buffered = new ArrayList<>();
+    /**
+     * Per partition, the number of times it was revoked or lost: a request carries the count of its fetch, so one
+     * fetched before a revocation is told from one fetched again after the reassignment (same offset).
+     */
+    private final Map<TopicPartition, Long> assignments = new HashMap<>();
     private boolean paused;
 
     public KafkaRequestLanes(
@@ -76,7 +82,8 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
             @Override
             public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
                 Set<TopicPartition> gone = new HashSet<>(partitions);
-                buffered.removeIf(r -> gone.contains(new TopicPartition(sourceByLane.get(r.lane()), r.partition())));
+                buffered.removeIf(r -> gone.contains(partitionOf(r)));
+                gone.forEach(tp -> assignments.merge(tp, 1L, Long::sum));
                 if (!partitions.isEmpty()) {
                     metrics.groupMembershipChange();
                 }
@@ -96,6 +103,11 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
      * is surfaced with a null {@code correlationId} / {@code requestKey} (malformed), never thrown.
      */
     static IncomingRequest toIncoming(String lane, ConsumerRecord<byte[], byte[]> record) {
+        return toIncoming(lane, record, 0L);
+    }
+
+    /** As {@link #toIncoming(String, ConsumerRecord)}, fetched under the partition's {@code assignment}. */
+    static IncomingRequest toIncoming(String lane, ConsumerRecord<byte[], byte[]> record, long assignment) {
         Map<String, byte[]> headers = new LinkedHashMap<>();
         for (Header h : record.headers()) {
             headers.put(h.key(), h.value());
@@ -110,7 +122,8 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
                 key == null ? null : new String(key, StandardCharsets.UTF_8),
                 corr == null ? null : new String(corr, StandardCharsets.UTF_8),
                 headers,
-                record.value());
+                record.value(),
+                assignment);
     }
 
     /** Keeps at most {@code quotaByLane.get(lane)} requests per lane (missing lane = 0), preserving order. */
@@ -138,6 +151,8 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         p.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, MAX_POLL_RECORDS);
         p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        // a rebalance revokes only the partitions that move: a held Cycle keeps its partitions and read positions
+        p.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, CooperativeStickyAssignor.class.getName());
         p.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         p.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         return p;
@@ -161,6 +176,50 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         }
     }
 
+    private IncomingRequest incoming(ConsumerRecord<byte[], byte[]> record) {
+        TopicPartition tp = new TopicPartition(record.topic(), record.partition());
+        return toIncoming(laneBySource.get(record.topic()), record, assignments.getOrDefault(tp, 0L));
+    }
+
+    private TopicPartition partitionOf(IncomingRequest r) {
+        return new TopicPartition(sourceByLane.get(r.lane()), r.partition());
+    }
+
+    @Override
+    public boolean revokedSinceFetch(IncomingRequest request) {
+        TopicPartition tp = partitionOf(request);
+        return assignments.getOrDefault(tp, 0L) != request.assignment() || !consumer.assignment().contains(tp);
+    }
+
+    /**
+     * Moves each retained partition's read position past the committed requests when it is behind them (a
+     * position reset to the old committed offset would re-read them); a position already ahead is left alone, so
+     * buffered surplus is not fetched twice.
+     */
+    @Override
+    public void committedAfterHold(List<IncomingRequest> requests) {
+        Map<TopicPartition, Long> next = new LinkedHashMap<>();
+        for (IncomingRequest r : requests) {
+            if (!revokedSinceFetch(r)) {
+                next.merge(partitionOf(r), r.position() + 1, Math::max);
+            }
+        }
+        next.forEach((tp, offset) -> {
+            if (readPosition(tp) < offset) {
+                consumer.seek(tp, offset);
+            }
+        });
+    }
+
+    /** The partition's read position, or -1 when it has none yet (it would be reset from the committed offset). */
+    private long readPosition(TopicPartition tp) {
+        try {
+            return consumer.position(tp, Duration.ZERO);
+        } catch (org.apache.kafka.common.errors.TimeoutException e) {
+            return -1;
+        }
+    }
+
     /** Polled-but-not-returned requests (surplus over the quotas). */
     int bufferedCount() {
         return buffered.size();
@@ -174,7 +233,7 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         if (buffered.isEmpty()) {
             consumer.resume(consumer.assignment());
             for (ConsumerRecord<byte[], byte[]> record : poll(POLL_TIMEOUT)) {
-                buffered.add(toIncoming(laneBySource.get(record.topic()), record));
+                buffered.add(incoming(record));
             }
         }
         return !buffered.isEmpty();
@@ -194,10 +253,10 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
 
     @Override
     public void release(List<IncomingRequest> requests) {
-        Set<TopicPartition> owned = consumer.assignment();
+        // a revoked partition's position is re-read (or moved to another member): its requests come again from there
         List<IncomingRequest> back = new ArrayList<>();
         for (IncomingRequest r : requests) {
-            if (owned.contains(new TopicPartition(sourceByLane.get(r.lane()), r.partition()))) {
+            if (!revokedSinceFetch(r)) {
                 back.add(r);
             }
         }
@@ -209,7 +268,7 @@ public class KafkaRequestLanes implements RequestLanes, AutoCloseable {
         applyPauses(quotaByLane);
         if (!covers(quotaByLane)) {
             for (ConsumerRecord<byte[], byte[]> record : poll(Duration.ZERO)) {
-                buffered.add(toIncoming(laneBySource.get(record.topic()), record));
+                buffered.add(incoming(record));
             }
         }
         List<IncomingRequest> kept = limitByQuota(buffered, quotaByLane);

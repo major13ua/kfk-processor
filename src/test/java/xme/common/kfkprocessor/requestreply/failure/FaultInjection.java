@@ -83,8 +83,12 @@ final class FaultInjection implements ReplySink, AutoCloseable {
     Consumer<GenericApplicationContext> beans(String group) {
         return ctx -> {
             ctx.registerBean("replySink", ReplySink.class, () -> {
+                // as in production: offsets travel with the lanes consumer's live group metadata (review r2 A1)
+                var lanes = ctx.getBean(xme.common.kfkprocessor.requestreply.ports.RequestLanes.class);
                 real = new KafkaReplySink(ctx.getBean(RequestReplyProperties.class),
-                        FailureHarness.KAFKA.getBootstrapServers(), group);
+                        FailureHarness.KAFKA.getBootstrapServers(), group,
+                        lanes instanceof xme.common.kfkprocessor.requestreply.adapters.kafka.KafkaRequestLanes k
+                                ? k::groupMetadata : null);
                 return this;
             });
             ctx.registerBean("requestReplyDestinationProbe", DestinationProbe.class, () -> () -> {

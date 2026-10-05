@@ -127,6 +127,10 @@ public final class Intake {
             }
             throw e;
         }
+        // a rebalance inside the fetch polls may have revoked partitions of requests fetched before it: they are
+        // read again from the committed offset (or by the new owner), so they do not enter this Cycle
+        accepted.removeIf(lanes::revokedSinceFetch);
+        errors.removeIf(e -> lanes.revokedSinceFetch(e.request()));
         long unused = granted - accepted.size();
         if (unused > 0) {
             try {
@@ -172,6 +176,16 @@ public final class Intake {
     /** Keeps the group membership alive while the worker is paused or holding a Cycle (consumes nothing). */
     public void keepAlive() {
         lanes.keepAlive();
+    }
+
+    /** See {@link RequestLanes#revokedSinceFetch}. */
+    public boolean revokedSinceFetch(IncomingRequest request) {
+        return lanes.revokedSinceFetch(request);
+    }
+
+    /** See {@link RequestLanes#committedAfterHold}. */
+    public void committedAfterHold(List<IncomingRequest> requests) {
+        lanes.committedAfterHold(requests);
     }
 
     private static IntakeResult paused() {

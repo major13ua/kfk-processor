@@ -35,6 +35,22 @@ public interface RequestLanes {
     default void release(List<IncomingRequest> requests) {
     }
 
+    /**
+     * True when the request's partition was revoked (or lost) in a rebalance after the request was fetched: its
+     * position is read again from the committed offset, or another member owns it, so no reply may be committed
+     * for it. A request fetched again after the reassignment is a new, valid request. Default: never revoked.
+     */
+    default boolean revokedSinceFetch(IncomingRequest request) {
+        return false;
+    }
+
+    /**
+     * A Cycle held across keep-alive polls has committed {@code requests}: the next fetch of their partitions
+     * must start after them (never before, never moving a read position backward). Default: nothing to do.
+     */
+    default void committedAfterHold(List<IncomingRequest> requests) {
+    }
+
     /** Stops fetching while staying in the group (pause by limiter or reply destination). */
     void pause();
 
