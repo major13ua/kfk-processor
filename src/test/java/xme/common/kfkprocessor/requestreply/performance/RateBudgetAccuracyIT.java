@@ -14,11 +14,15 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** AC-10 and QG-1: several workers drain a backlog under one shared Rate Budget, one worker restarted on the way. */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class RateBudgetAccuracyIT {
 
-    private static final long BUDGET = 200;
-    private static final int N = 3000;
+    /**
+     * CI scale: 15 s of catch-up at 200/s. Test-plan scale (5 minutes of backlog at 2,000/s, 10 minutes of catch-up)
+     * runs pre-release: {@code ./gradlew preReleaseTest -Dperf.rate.budget=2000 -Dperf.rate.backlog=600000}.
+     */
+    private static final long BUDGET = Long.getLong("perf.rate.budget", 200);
+    private static final int N = Integer.getInteger("perf.rate.backlog", 3000);
     private static final int WORKERS = 3;
 
     @Test
@@ -85,7 +89,7 @@ class RateBudgetAccuracyIT {
                     return "pong:" + req;
                 }));
             }
-            await("backlog drained", Duration.ofSeconds(120), () -> distinct.size() >= N);
+            await("backlog drained", Duration.ofSeconds(120 + 2 * N / BUDGET), () -> distinct.size() >= N);
         } finally {
             sampler.interrupt();
             workers.forEach(Worker::close);

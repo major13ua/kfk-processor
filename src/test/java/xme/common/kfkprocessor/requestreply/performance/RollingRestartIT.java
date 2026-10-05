@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** AC-14 and QG-3: workers restarted one by one with the same identity inside the identity window. */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class RollingRestartIT {
 
     private static final String MEMBERSHIP = "requestreply.group.membership.changes";

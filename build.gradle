@@ -43,9 +43,14 @@ dependencies {
     testAnnotationProcessor 'org.projectlombok:lombok'
 }
 
+// Container-based tests (*IT and the Spring smoke test) FAIL without Docker, so a CI without Docker cannot pass silently.
+// Local opt-out only: ./gradlew test -PskipDockerTests  (runs the unit tests only; never use it in CI).
 tasks.named('test') {
     useJUnitPlatform {
         excludeTags 'load'
+    }
+    if (project.hasProperty('skipDockerTests')) {
+        exclude '**/*IT.class', '**/KfkProcessorApplicationTests.class'
     }
 }
 
@@ -63,6 +68,27 @@ tasks.register('loadTest', Test) {
     }
     // pass -Dload.target=... -Dload.seconds=... etc. through to the test JVM
     systemProperties System.properties.findAll { k, v -> k.toString().startsWith('load.') }
+    outputs.upToDateWhen { false }
+    shouldRunAfter tasks.named('test')
+}
+
+// Pre-release run of the performance suite at test-plan scale: `./gradlew preReleaseTest -Dperf.rate.budget=2000
+// -Dperf.rate.backlog=600000` (see test-plan.md, "Reduced scale"). Not part of `check`.
+tasks.register('preReleaseTest', Test) {
+    description = 'Runs the performance ITs; pass -Dperf.* to raise them to full test-plan scale.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        excludeTags 'load'
+    }
+    filter {
+        includeTestsMatching 'xme.common.kfkprocessor.requestreply.performance.*'
+    }
+    testLogging {
+        showStandardStreams = true
+    }
+    systemProperties System.properties.findAll { k, v -> k.toString().startsWith('perf.') }
     outputs.upToDateWhen { false }
     shouldRunAfter tasks.named('test')
 }

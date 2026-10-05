@@ -13,7 +13,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import xme.common.kfkprocessor.requestreply.engine.LaneShares;
 
 /** AC-11 and AC-12 (QG-4): three busy lanes at the Rate Budget; per-lane accepted-rate metric against effective share. */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class WeightAccuracyIT {
 
     /** Realistic budget (the per-group throughput target is 2,000/s). */

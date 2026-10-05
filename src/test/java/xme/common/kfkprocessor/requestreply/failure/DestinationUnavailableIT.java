@@ -10,7 +10,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import xme.common.kfkprocessor.requestreply.engine.WorkerState;
 
 /** AC-08b: reply destination unavailable. */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class DestinationUnavailableIT {
 
     private static final int N = 3;

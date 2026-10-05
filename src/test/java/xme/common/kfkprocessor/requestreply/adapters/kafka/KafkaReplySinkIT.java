@@ -35,7 +35,7 @@ import xme.common.kfkprocessor.requestreply.ports.ReplyRecord;
  * Each test creates its own topics, group and identity, so tests share only the (never destroyed) broker.
  * Readers use read_committed, as Requesters must (ADR-0002).
  */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class KafkaReplySinkIT {
 
     @Container

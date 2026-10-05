@@ -47,7 +47,8 @@ public final class WorkerProcessMain {
             g.registerBean("handler", RequestReplyHandler.class, () -> handler);
         };
         new SpringApplicationBuilder(FailureHarness.Base.class).web(WebApplicationType.NONE)
-                .bannerMode(Banner.Mode.OFF).logStartupInfo(false).properties(props).initializers(init).run();
+                .bannerMode(Banner.Mode.OFF).logStartupInfo(false).properties(props).initializers(init)
+                .run("--xme.request-reply.enabled=true"); // outranks the host application.properties
         Thread.currentThread().join();
     }
 }

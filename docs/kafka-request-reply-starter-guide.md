@@ -11,11 +11,12 @@ You supply one Handler bean and `xme.request-reply.*` configuration. The starter
 Build and test locally:
 
 ```
-./gradlew build       # compile, lint, unit and integration tests (Docker needed for Testcontainers tests)
+./gradlew build       # compile, lint, unit and integration tests (Docker needed: Testcontainers tests FAIL without it)
+./gradlew test -PskipDockerTests   # local opt-out: unit tests only, never in CI
 ./gradlew loadTest    # slow throughput run, tagged "load", excluded from the default test task
 ```
 
-`loadTest` reports the provisional throughput target and never fails the build on a miss (see [Known behaviours](#6-known-behaviours)). Options: `-Dload.target`, `-Dload.seconds`, `-Dload.workers`, `-Dload.handler-ms`, `-Dload.hot-percent`, `-Dload.phases`.
+`loadTest` asserts the provisional throughput target for the unique-key phase and only reports the fast-Handler and hot-key phases (see [Known behaviours](#6-known-behaviours)). Options: `-Dload.target`, `-Dload.seconds`, `-Dload.workers`, `-Dload.handler-ms`, `-Dload.hot-percent`, `-Dload.phases`.
 
 ## 2. Handler contract
 
@@ -151,7 +152,7 @@ Tags are limited to `lane` and `category`.
 - **Rate Budget burst cap is budget/20.** The shared counter's burst capacity is `max(1, budget / 20)` (5%). This keeps any sliding second near budget x 1.05. A consequence: with slow Cycles, throughput can fall below the configured budget, because unused allowance cannot accumulate beyond the cap. Budgets under 20 keep a minimum capacity of 1.
 - **Rate Budget accuracy NFR is x1.10.** Accepted rate must stay at or under budget x 1.10 in any sliding 1 s window. The Tech Lead widened it from x1.05 to x1.10 (commit 23a544b). Measured peaks went up to about x1.075. The value is still labelled provisional in spec §6.
 - **Hot-key ordering throttles one partition.** Requests with the same Request Key run one after another, so a hot key limits parallelism. The `loadTest` hot-key phase measured 863 requests/s against the provisional 2,000 requests/s target (commit 827379a: "reported, not hidden"). The "3000/s" figure quoted in the task request is not found in the code, tests or docs and is not used here.
-- **Throughput target is reported, not asserted.** `loadTest` prints a MISSED line when the provisional target is not met.
+- **Throughput target is asserted for unique keys only.** `loadTest` fails when the unique-key phase is below the target; the fast-Handler and hot-key phases print a MISSED line and do not fail.
 - **Cross-lane ordering is not guaranteed** (section 3, rule 2).
 - **Head-of-line delay.** One slow request can hold its Cycle for up to the Cycle deadline, including requests of high-weight lanes.
 - **Priority is a share of the Rate Budget**, not strict precedence. Idle lanes hand their share to busy lanes.

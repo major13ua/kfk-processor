@@ -38,5 +38,5 @@
 | F6 | Startup validation, handler types, docs (B9, B14, B13) | done |
 | F7 | Probe (B10) | done |
 | F8 | Per-lane key chains (B11) | done |
-| F9 | Test gaps (Group D) | todo |
+| F9 | Test gaps (Group D) | done |
 | F10 | Spec drift + stage-2 docs (Group C) | todo |

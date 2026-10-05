@@ -56,7 +56,7 @@ import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
  * <li>a {@link WorkerState} bean and the {@code requestreply.state} gauge (RUNNING 0, PAUSED 1) expose the state.</li>
  * </ul>
  */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 @SpringBootTest(classes = RequestReplyPermissionIT.App.class)
 class RequestReplyPermissionIT {
 
@@ -113,6 +113,7 @@ class RequestReplyPermissionIT {
             admin.createTopics(List.of(new NewTopic(REQUESTS, 2, (short) 1), new NewTopic(REPLIES, 1, (short) 1)))
                     .all().get();
         }
+        r.add("xme.request-reply.enabled", () -> "true"); // the host application.properties turns the starter off
         r.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
         r.add("xme.request-reply.allowance-store.redis-uri",
                 () -> "redis://" + redis.getHost() + ":" + redis.getMappedPort(6379));
@@ -144,7 +145,14 @@ class RequestReplyPermissionIT {
             assertThat(a.faultId()).isEqualTo("request_reply.reply_destination.permission_denied");
         });
 
-        // stays in its group with the same lanes
+        // stays in its group with the same lanes (the join completes asynchronously after the pause is first seen)
+        await(() -> {
+            try {
+                return assignmentOf(IDENTITY).size() == 2;
+            } catch (Exception e) {
+                return false;
+            }
+        }, "group assignment of both partitions");
         Set<TopicPartition> before = assignmentOf(IDENTITY);
         assertThat(before).hasSize(2);
 

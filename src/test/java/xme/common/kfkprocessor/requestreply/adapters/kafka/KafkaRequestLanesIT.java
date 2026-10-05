@@ -31,7 +31,7 @@ import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
  * Each test creates its own topics and group, so tests share only the (never destroyed) broker.
  * Header names follow the OQ-1 default (headers).
  */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class KafkaRequestLanesIT {
 
     @Container

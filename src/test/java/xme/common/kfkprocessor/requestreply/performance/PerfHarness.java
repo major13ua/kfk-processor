@@ -141,7 +141,13 @@ final class PerfHarness {
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName(),
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName(),
                 ProducerConfig.LINGER_MS_CONFIG, 20,
-                ProducerConfig.BATCH_SIZE_CONFIG, 131072))) {
+                ProducerConfig.BATCH_SIZE_CONFIG, 131072,
+                // a loaded or re-bootstrapping broker must not fail the setup: idempotent retries within generous timeouts
+                ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true,
+                ProducerConfig.RETRIES_CONFIG, Integer.MAX_VALUE,
+                ProducerConfig.MAX_BLOCK_MS_CONFIG, 120_000,
+                ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 30_000,
+                ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 180_000))) {
             String created = java.time.Instant.now().toString();
             java.util.concurrent.atomic.AtomicReference<Exception> failed = new java.util.concurrent.atomic.AtomicReference<>();
             for (int i = 0; i < n; i++) {

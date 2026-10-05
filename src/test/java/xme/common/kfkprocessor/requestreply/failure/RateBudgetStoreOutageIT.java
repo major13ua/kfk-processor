@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** AC-18 and QG-1: the Rate Budget store (Redis) is stopped and started again (same address, state lost). */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class RateBudgetStoreOutageIT {
 
     private static final long BUDGET = 20;

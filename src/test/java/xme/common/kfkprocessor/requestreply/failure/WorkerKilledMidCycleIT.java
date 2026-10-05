@@ -16,7 +16,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** AC-03 and AC-05: a worker killed (SIGKILL) mid-Cycle and restarted with the same identity. */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class WorkerKilledMidCycleIT {
 
     @TempDir

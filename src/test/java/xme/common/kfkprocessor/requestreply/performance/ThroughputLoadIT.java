@@ -18,14 +18,16 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * NFR "Aggregate throughput" (spec section 6), provisional target 2,000 requests/s per group. Slow: run with
- * {@code ./gradlew loadTest}. The provisional target is REPORTED, never asserted: a miss prints a MISSED line in the
- * result summary and does not fail the build. Only functional invariants (everything handled, per-key order) assert.
+ * {@code ./gradlew loadTest}. The uniform-key phase ASSERTS the target (the NFR is aggregate throughput of at least
+ * 2,000 requests/s); the fast-Handler and hot-key phases are REPORTED only (a miss prints a MISSED line), the hot key
+ * being the documented effect of per-key ordering. Functional invariants (everything handled, per-key order) assert in
+ * every phase.
  * Targets come from system properties so a changed provisional number is not a code change:
  * {@code load.target} (default 2000), {@code load.seconds} (default 20), {@code load.workers} (4),
  * {@code load.handler-ms} (simulated Handler work, default 2), {@code load.hot-percent} (default 30).
  */
 @Tag("load")
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class ThroughputLoadIT {
 
     private static final int TARGET = Integer.getInteger("load.target", 2000);
@@ -68,7 +70,7 @@ class ThroughputLoadIT {
         for (Result r : results) {
             out.append(String.format("[T17 THROUGHPUT] %-52s steady %.0f/s %s | cycle duration mean %.0f ms, max %.0f ms"
                             + " (head-of-line proxy) | per-key order violations %d%n", r.name(), r.steadyRate(),
-                    r.steadyRate() >= TARGET ? "MET" : "MISSED (reported, not failed)", r.cycleMeanMs(),
+                    r.steadyRate() >= TARGET ? "MET" : "MISSED", r.cycleMeanMs(),
                     r.cycleMaxMs(), r.orderViolations()));
         }
         if (uniform != null && hot != null) {
@@ -78,7 +80,11 @@ class ThroughputLoadIT {
         }
         System.out.println(out);
 
-        // functional invariants only, never the provisional rate
+        if (uniform != null) {
+            assertThat(uniform.steadyRate()).as("aggregate throughput with unique keys: " + uniform.name())
+                    .isGreaterThanOrEqualTo(TARGET);
+        }
+        // functional invariants in every phase
         for (Result r : results) {
             assertThat(r.handled()).as("all requests handled: " + r.name()).isGreaterThanOrEqualTo(TARGET * SECONDS);
             assertThat(r.orderViolations()).as("requests of one key run in arrival order: " + r.name()).isZero();
@@ -117,7 +123,7 @@ class ThroughputLoadIT {
         System.out.println(String.format("[T17 THROUGHPUT] RESULT %-52s handled %d, steady %.0f/s (peak second %d) %s | cycle"
                 + " duration mean %.0f ms, max %.0f ms | per-key order violations %d%n  accepted per second %s",
                 r.name(), r.handled(), r.steadyRate(), r.peakSecond(),
-                r.steadyRate() >= TARGET ? "MET" : "MISSED (reported, not failed)", r.cycleMeanMs(), r.cycleMaxMs(),
+                r.steadyRate() >= TARGET ? "MET" : "MISSED", r.cycleMeanMs(), r.cycleMaxMs(),
                 r.orderViolations(), r.perSecond()));
     }
 

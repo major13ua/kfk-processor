@@ -195,7 +195,9 @@ public final class FailureHarness {
         };
         ConfigurableApplicationContext ctx = new SpringApplicationBuilder(Base.class)
                 .web(WebApplicationType.NONE).bannerMode(Banner.Mode.OFF).logStartupInfo(false)
-                .properties(props).initializers(init).run();
+                .properties(props).initializers(init)
+                // a command-line argument outranks the host application.properties, which turns the starter off
+                .run("--xme.request-reply.enabled=true");
         return new Worker(ctx, registry);
     }
 
@@ -209,7 +211,13 @@ public final class FailureHarness {
         try (var producer = new KafkaProducer<byte[], byte[]>(Map.<String, Object>of(
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName(),
-                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName()))) {
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName(),
+                // setup must not fail on a slow broker: idempotent retries within generous timeouts
+                ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true,
+                ProducerConfig.RETRIES_CONFIG, Integer.MAX_VALUE,
+                ProducerConfig.MAX_BLOCK_MS_CONFIG, 120_000,
+                ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 30_000,
+                ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 180_000))) {
             java.util.concurrent.atomic.AtomicReference<Exception> failed = new java.util.concurrent.atomic.AtomicReference<>();
             for (String id : correlationIds) {
                 var rec = new ProducerRecord<byte[], byte[]>(topic, null, ("req-" + id).getBytes(StandardCharsets.UTF_8));
@@ -237,7 +245,15 @@ public final class FailureHarness {
         return ids;
     }
 
-    public record Rep(String correlationId, String requestKey, String body) {
+    /** {@code type} is the wire header telling a reply ({@code reply}) from an Error Reply ({@code error_reply}). */
+    public record Rep(String correlationId, String requestKey, String body, String type) {
+        public Rep(String correlationId, String requestKey, String body) {
+            this(correlationId, requestKey, body, null);
+        }
+
+        public boolean isErrorReply() {
+            return "error_reply".equals(type);
+        }
     }
 
     /** All replies visible to a committed-only reader right now (polls for {@code listen}). */
@@ -261,7 +277,8 @@ public final class FailureHarness {
                 for (var rec : consumer.poll(Duration.ofMillis(200))) {
                     out.add(new Rep(header(rec.headers().lastHeader("correlation_id")),
                             header(rec.headers().lastHeader("request_key")),
-                            new String(rec.value(), StandardCharsets.UTF_8)));
+                            rec.value() == null ? null : new String(rec.value(), StandardCharsets.UTF_8),
+                            header(rec.headers().lastHeader("type"))));
                 }
             }
         }
@@ -286,7 +303,7 @@ public final class FailureHarness {
     }
 
     private static String header(Header h) {
-        return h == null ? null : new String(h.value(), StandardCharsets.UTF_8);
+        return h == null || h.value() == null ? null : new String(h.value(), StandardCharsets.UTF_8);
     }
 
     public static void await(String what, Duration timeout, BooleanSupplier condition) {

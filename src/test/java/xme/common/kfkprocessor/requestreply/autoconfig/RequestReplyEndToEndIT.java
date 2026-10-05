@@ -50,7 +50,7 @@ import xme.common.kfkprocessor.requestreply.api.RequestReplyHandler;
  * <li>Consistency lag source: the {@code created_at} header, else the record timestamp.</li>
  * </ul>
  */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 @SpringBootTest(classes = RequestReplyEndToEndIT.App.class)
 class RequestReplyEndToEndIT {
 
@@ -85,6 +85,7 @@ class RequestReplyEndToEndIT {
             admin.createTopics(List.of(new NewTopic(HIGH, 1, (short) 1), new NewTopic(LOW, 1, (short) 1),
                     new NewTopic(REPLIES, 1, (short) 1))).all().get();
         }
+        r.add("xme.request-reply.enabled", () -> "true"); // the host application.properties turns the starter off
         r.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
         r.add("xme.request-reply.allowance-store.redis-uri",
                 () -> "redis://" + redis.getHost() + ":" + redis.getMappedPort(6379));

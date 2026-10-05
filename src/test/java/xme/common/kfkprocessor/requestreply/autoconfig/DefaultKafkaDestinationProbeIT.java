@@ -16,7 +16,7 @@ import org.testcontainers.kafka.KafkaContainer;
 import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
 
 /** The probe against a real broker (no ACLs: every operation is allowed, so denial is covered by the unit test). */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class DefaultKafkaDestinationProbeIT {
 
     @Container

@@ -16,7 +16,7 @@ import org.testcontainers.utility.DockerImageName;
 import xme.common.kfkprocessor.requestreply.api.AllowanceStoreUnavailableException;
 
 @TestMethodOrder(OutageLastOrderer.class)
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class RedisAllowanceStoreIT {
 
     private static final long BUDGET = 100;

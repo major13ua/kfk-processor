@@ -98,6 +98,19 @@ A reusable worker starter: global Rate Budget at intake, weighted Priority Lanes
 - Pause on limiter outage (new requests stop within 5 s, resume within 30 s) → cut the allowance store for 2 minutes under 1,000 requests/s, assert intake stops within 5 s and resumes within 30 s of return (integration scale, also run in the performance environment).
 - Consistency Lag p95 and Stall detection: <!-- N/A: lag target is TBD (§8); stall threshold is covered by the integration test above -->
 
+## Scale of the implemented tests (reduced, recorded in F9)
+
+The integration and load tests in the repository run at a reduced scale so they fit a PR build. Full scale is a pre-release run.
+
+| NFR test | Test-plan scale | Implemented default | Full scale |
+|---|---|---|---|
+| Rate Budget accuracy (`RateBudgetAccuracyIT`) | 5 min backlog, 10 min catch-up, 1 restart | 3,000 requests at 200/s (about 15 s), 3 workers, 1 restart | `./gradlew preReleaseTest -Dperf.rate.budget=2000 -Dperf.rate.backlog=600000` |
+| Priority Weight accuracy (`WeightAccuracyIT`) | 10 min at the budget | window of 10 s of accepted requests at 2,000/s and at 200/s | not parameterised yet |
+| Aggregate throughput (`ThroughputLoadIT`, tag `load`) | 2,000/s for 10 min | 2,000/s for 20 s, 4 workers; unique-key phase asserted | `./gradlew loadTest -Dload.seconds=600` |
+| Time-dependent rules (30 s timeout, 60 s commit window, 45 s identity window, 60 s stall) | full values pre-release | shortened (2 to 10 s) | not run at full values yet |
+
+Integration tests need Docker and fail without it; `-PskipDockerTests` is a local-only opt-out.
+
 ## CI placement
 
 - On every PR: unit and contract suites.

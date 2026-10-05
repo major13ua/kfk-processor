@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** AC-19: Handlers hit their timeout against a slow downstream; Requesters get Error Replies at a bounded rate. */
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class DegradedDownstreamIT {
 
     private static final long BUDGET = 10;
