@@ -1,0 +1,31 @@
+// Remote container mode for the tests (docs/features/remote-docker-test). Applied from build.gradle.
+// No switch: tests use the machine's own container engine. -Premote: containers start on the remote host.
+
+ext.remoteDocker = [
+        remote : project.hasProperty('remote'),
+        prefix : '[remote-docker]',
+        // variables that point a test JVM off this machine; cleared in local mode
+        offMachineEnv: ['TESTCONTAINERS_HOST_OVERRIDE', 'TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE']
+]
+
+def rd = remoteDocker
+def target = rd.remote ? 'remote' : 'local'
+
+tasks.withType(Test).configureEach { testTask ->
+    testTask.inputs.property('containerTarget', target)
+    if (rd.remote) {
+        testTask.outputs.upToDateWhen { false }
+    } else {
+        rd.offMachineEnv.each { testTask.environment.remove(it) }
+        def dockerHost = testTask.environment.get('DOCKER_HOST')
+        if (dockerHost != null && !dockerHost.toString().startsWith('unix://')) {
+            testTask.environment.remove('DOCKER_HOST')
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it instanceof Test && it.project == project }) {
+        logger.lifecycle("${rd.prefix} Container target: ${rd.remote ? 'remote' : 'local'}")
+    }
+}

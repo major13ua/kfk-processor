@@ -38,6 +38,7 @@ dependencies {
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-kafka'
     testCompileOnly 'org.projectlombok:lombok'
+    testImplementation gradleTestKit()
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testAnnotationProcessor 'org.projectlombok:lombok'
 }
@@ -91,3 +92,6 @@ tasks.register('preReleaseTest', Test) {
     outputs.upToDateWhen { false }
     shouldRunAfter tasks.named('test')
 }
+
+// Remote container mode: -Premote runs test containers on the Developer's remote host (see docs/remote-docker-test.md).
+apply from: 'gradle/remote-docker.gradle'
