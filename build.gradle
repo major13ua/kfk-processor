@@ -38,7 +38,8 @@ dependencies {
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-kafka'
     testCompileOnly 'org.projectlombok:lombok'
-    testImplementation gradleTestKit()
+    // TestKit brings Gradle's own logging classes: compile-only here, added at runtime to buildLogicTest only
+    testCompileOnly gradleTestKit()
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testAnnotationProcessor 'org.projectlombok:lombok'
 }
@@ -49,10 +50,25 @@ tasks.named('test') {
     useJUnitPlatform {
         excludeTags 'load'
     }
+    exclude '**/build/**'   // build-logic tests run in buildLogicTest
     if (project.hasProperty('skipDockerTests')) {
         exclude '**/*IT.class', '**/KfkProcessorApplicationTests.class'
     }
 }
+
+// Tests of gradle/remote-docker.gradle with Gradle TestKit (fake ssh, fake engine; no containers).
+configurations.create('testKitRuntime')
+dependencies { testKitRuntime gradleTestKit() }
+tasks.register('buildLogicTest', Test) {
+    description = 'Tests the remote-docker build script with Gradle TestKit.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath + configurations.testKitRuntime
+    useJUnitPlatform()
+    filter { includeTestsMatching 'xme.common.kfkprocessor.build.*' }
+    outputs.upToDateWhen { false }
+}
+tasks.named('check') { dependsOn 'buildLogicTest' }
 
 // Slow load/throughput runs (T17): `./gradlew loadTest`; excluded from the default `test` task.
 tasks.register('loadTest', Test) {

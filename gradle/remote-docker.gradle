@@ -1,22 +1,133 @@
 // Remote container mode for the tests (docs/features/remote-docker-test). Applied from build.gradle.
-// No switch: tests use the machine's own container engine. -Premote: containers start on the remote host.
+// No switch: tests use the machine's own container engine. -Premote: containers start on the remote host
+// through an ssh tunnel that the build opens before the tests and closes after them.
 
-ext.remoteDocker = [
-        remote : project.hasProperty('remote'),
-        prefix : '[remote-docker]',
-        // variables that point a test JVM off this machine; cleared in local mode
-        offMachineEnv: ['TESTCONTAINERS_HOST_OVERRIDE', 'TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE']
-]
+import java.net.StandardProtocolFamily
+import java.net.UnixDomainSocketAddress
+import java.nio.ByteBuffer
+import java.nio.channels.Channels
+import java.nio.channels.SocketChannel
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
-def rd = remoteDocker
-def target = rd.remote ? 'remote' : 'local'
+interface RemoteDockerTunnelParams extends BuildServiceParameters {
+    Property<String> getAddress()
+    Property<String> getRemoteSocket()
+    Property<String> getLocalSocket()
+    Property<String> getSshCommand()
+}
+
+/** Owns the ssh process forwarding the remote engine socket to a local socket; closed by Gradle at build end. */
+abstract class RemoteDockerTunnel implements BuildService<RemoteDockerTunnelParams>, AutoCloseable {
+    private Process process
+
+    /** Starts ssh and waits until the local socket exists. Returns null on success, else the failure reason. */
+    String open(long deadlineNanos) {
+        def p = parameters
+        def cmd = [p.sshCommand.get(), '-N', '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes',
+                   '-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=15',
+                   '-L', "${p.localSocket.get()}:${p.remoteSocket.get()}".toString(), p.address.get()]
+        try {
+            process = new ProcessBuilder(cmd).redirectErrorStream(true).start()
+        } catch (IOException e) {
+            return "the '${p.sshCommand.get()}' command could not be started (${e.message})".toString()
+        }
+        def sock = new File(p.localSocket.get())
+        while (System.nanoTime() < deadlineNanos) {
+            if (sock.exists()) return null
+            if (!process.alive) {
+                return "ssh exited with code ${process.exitValue()}: ${process.inputStream.text.trim()}".toString()
+            }
+            Thread.sleep(100)
+        }
+        return 'ssh did not open the tunnel in time'
+    }
+
+    /** Sends an engine ping over the local socket. Returns null when the engine answers, else the failure reason. */
+    String ping(long deadlineNanos) {
+        def socketPath = parameters.localSocket.get()
+        def pool = Executors.newSingleThreadExecutor { r -> new Thread(r, 'remote-docker-ping').with { it.daemon = true; it } }
+        try {
+            def future = pool.submit({
+                SocketChannel ch = SocketChannel.open(StandardProtocolFamily.UNIX)
+                try {
+                    ch.connect(UnixDomainSocketAddress.of(socketPath))
+                    ch.write(ByteBuffer.wrap('GET /_ping HTTP/1.0\r\nHost: docker\r\n\r\n'.getBytes(StandardCharsets.US_ASCII)))
+                    def reader = new BufferedReader(new InputStreamReader(Channels.newInputStream(ch), StandardCharsets.US_ASCII))
+                    return reader.readLine()
+                } finally {
+                    ch.close()
+                }
+            } as Callable<String>)
+            def remainingMs = Math.max(1L, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime()))
+            def status = future.get(remainingMs, TimeUnit.MILLISECONDS)
+            return (status != null && status.matches('HTTP/1\\.[01] 200.*')) ? null : "unexpected answer '${status}'".toString()
+        } catch (TimeoutException ignored) {
+            return 'no answer in time'
+        } catch (Exception e) {
+            return (e.cause ?: e).toString()
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Override
+    void close() {
+        if (process != null) {
+            process.destroy()
+            if (!process.waitFor(5, TimeUnit.SECONDS)) process.destroyForcibly()
+        }
+        new File(parameters.localSocket.get()).delete()
+    }
+}
+
+def prefix = '[remote-docker]'
+def remote = project.hasProperty('remote')
+def target = remote ? 'remote' : 'local'
+def address = project.findProperty('remoteDocker.host')?.toString()?.trim()
+def remoteSocket = project.findProperty('remoteDocker.socket')?.toString()?.trim() ?: '/var/run/docker.sock'
+def sshCommand = project.findProperty('remoteDocker.sshCommand')?.toString() ?: 'ssh'
+def budgetSeconds = (project.findProperty('remoteDocker.timeoutSeconds') ?: '30').toString().toInteger()
+def userFile = new File(project.findProperty('remoteDocker.userFile')?.toString()
+        ?: "${System.getProperty('user.home')}/.testcontainers.properties")
+def localSocket = project.findProperty('remoteDocker.localSocket')?.toString()
+        ?: "/tmp/remote-docker-${UUID.randomUUID().toString().take(8)}.sock".toString()
+
+def stop = { String message -> throw new GradleException("${prefix} ${message}".toString()) }
+
+// ssh://user@host[:port]; returns the host name or null when the value is not a secure-shell address
+def sshHostOf = { String value ->
+    try {
+        def uri = new URI(value)
+        return (uri.scheme == 'ssh' && uri.host && uri.userInfo && !(uri.path ?: '').replace('/', '')) ? uri.host : null
+    } catch (URISyntaxException ignored) {
+        return null
+    }
+}
+
+def tunnel = remote ? gradle.sharedServices.registerIfAbsent('remoteDockerTunnel', RemoteDockerTunnel) {
+    it.parameters.address.set(address ?: '')
+    it.parameters.remoteSocket.set(remoteSocket)
+    it.parameters.localSocket.set(localSocket)
+    it.parameters.sshCommand.set(sshCommand)
+} : null
 
 tasks.withType(Test).configureEach { testTask ->
     testTask.inputs.property('containerTarget', target)
-    if (rd.remote) {
+    if (remote) {
         testTask.outputs.upToDateWhen { false }
+        if (testTask.name == 'test') {
+            testTask.usesService(tunnel)
+            testTask.environment('DOCKER_HOST', "unix://${localSocket}".toString())
+            testTask.environment('TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE', remoteSocket)
+            def host = address ? sshHostOf(address) : null
+            if (host) testTask.environment('TESTCONTAINERS_HOST_OVERRIDE', host)
+        }
     } else {
-        rd.offMachineEnv.each { testTask.environment.remove(it) }
+        ['TESTCONTAINERS_HOST_OVERRIDE', 'TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE'].each { testTask.environment.remove(it) }
         def dockerHost = testTask.environment.get('DOCKER_HOST')
         if (dockerHost != null && !dockerHost.toString().startsWith('unix://')) {
             testTask.environment.remove('DOCKER_HOST')
@@ -25,7 +136,43 @@ tasks.withType(Test).configureEach { testTask ->
 }
 
 gradle.taskGraph.whenReady { graph ->
-    if (graph.allTasks.any { it instanceof Test && it.project == project }) {
-        logger.lifecycle("${rd.prefix} Container target: ${rd.remote ? 'remote' : 'local'}")
+    def own = graph.allTasks.findAll { it instanceof Test && it.project == project }
+    if (own.isEmpty()) return
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(budgetSeconds)
+
+    if (remote) {
+        if (own.any { it.name in ['loadTest', 'preReleaseTest'] }) {
+            stop('loadTest and preReleaseTest are local-only: network latency distorts their timings. Run them without -Premote.')
+        }
+        if (!address) {
+            stop("remote mode needs the setting 'remoteDocker.host' (for example remoteDocker.host=ssh://user@host). " +
+                    'Set it in ~/.gradle/gradle.properties, not in the project.')
+        }
+        if (sshHostOf(address) == null) {
+            stop("remoteDocker.host must be a secure-shell address like ssh://user@host, got '${address}'. " +
+                    'Plain tcp:// and http:// engine addresses are refused.')
+        }
+        def service = tunnel.get()
+        def openFailure = service.open(deadline)
+        if (openFailure) stop("could not open the tunnel to ${address}: ${openFailure}".toString())
+        def pingFailure = service.ping(deadline)
+        if (pingFailure) {
+            stop("the container service on the remote host ${address} is not running or does not answer (${pingFailure})".toString())
+        }
+        logger.lifecycle("${prefix} Container target: remote ${address}")
+    } else {
+        if (userFile.isFile()) {
+            def props = new Properties()
+            userFile.withInputStream { props.load(it) }
+            def offMachine = ['docker.host', 'tc.host'].findAll { k ->
+                def v = props.getProperty(k)
+                v != null && !v.startsWith('unix://')
+            } + ['host.override'].findAll { props.getProperty(it) != null }
+            if (offMachine) {
+                stop("${userFile} sets ${offMachine.join(', ')}, which would send a local run to another machine. " +
+                        'Remove it from that file, or use -Premote.')
+            }
+        }
+        logger.lifecycle("${prefix} Container target: local")
     }
 }
