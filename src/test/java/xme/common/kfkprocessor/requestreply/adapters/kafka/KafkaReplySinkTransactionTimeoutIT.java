@@ -1,6 +1,8 @@
 package xme.common.kfkprocessor.requestreply.adapters.kafka;
 
+import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -58,9 +60,9 @@ class KafkaReplySinkTransactionTimeoutIT {
     private static final int N = 5;
 
     @Container
-    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.0")
+    static KafkaContainer kafka = newKafka(k -> k
             // the broker aborts timed-out transactions promptly instead of after the 10 s default sweep
-            .withEnv("KAFKA_TRANSACTION_ABORT_TIMED_OUT_TRANSACTION_CLEANUP_INTERVAL_MS", "500");
+            .withEnv("KAFKA_TRANSACTION_ABORT_TIMED_OUT_TRANSACTION_CLEANUP_INTERVAL_MS", "500"));
 
     private static byte[] b(String s) {
         return s.getBytes(StandardCharsets.UTF_8);
@@ -135,6 +137,7 @@ class KafkaReplySinkTransactionTimeoutIT {
             cycle.add(new HandlerResult<>(request, new Reply<>("c-" + i, "key-" + i, "r-" + i), null));
         }
 
+        boolean fenced;
         var alerts = new ArrayList<CommitRetry.Alert>();
         var clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
         var state = new WorkerState(clock, Duration.ofSeconds(60), (WorkerMetrics) Proxy.newProxyInstance(
@@ -144,19 +147,31 @@ class KafkaReplySinkTransactionTimeoutIT {
             var retry = new CommitRetry<String, String>(committer(sink), () -> { }, state, clock,
                     Duration.ofSeconds(1), 3, alerts::add);
 
-            assertTrue(retry.commit(cycle).isEmpty(), "the fenced commit is held, not committed");
-            assertTrue(retry.holding());
-            assertEquals(WorkerState.Status.PAUSED, state.evaluate());
-            assertEquals(List.of("request_reply.reply_destination.fenced"),
-                    alerts.stream().map(CommitRetry.Alert::faultId).toList());
-            // stays fenced: the same sink never takes the transactional id back, so nothing is sent again
-            assertThrows(ReplyDestinationFault.Fenced.class, () -> committer(sink).commit(cycle));
+            // The broker generation decides how the timed-out commit surfaces. Brokers 3.x: INVALID_PRODUCER_EPOCH, which
+            // the client reports as ProducerFenced: the commit is held and the worker pauses (permanent fence).
+            // Brokers 4.x (KIP-890): INVALID_TXN_STATE, a definitive "not committed": the sink resends and commits.
+            // Either way the Cycle is committed once, which the checks below verify.
+            fenced = retry.commit(cycle).isEmpty();
+            if (fenced) {
+                assertTrue(retry.holding());
+                assertEquals(WorkerState.Status.PAUSED, state.evaluate());
+                assertEquals(List.of("request_reply.reply_destination.fenced"),
+                        alerts.stream().map(CommitRetry.Alert::faultId).toList());
+                // stays fenced: the same sink never takes the transactional id back, so nothing is sent again
+                assertThrows(ReplyDestinationFault.Fenced.class, () -> committer(sink).commit(cycle));
+            } else {
+                assertTrue(alerts.isEmpty(), "recovered in place: no fence alert");
+                assertNotEquals(WorkerState.Status.PAUSED, state.evaluate());
+            }
         }
 
-        // restart: a new sink with a new producer takes the id; commits the same Cycle object (producer recovery only, a real restart re-fetches the requests and re-runs the Handlers)
-        try (var restarted = new KafkaReplySink(new KafkaProducer<>(producerProps), replies, Map.of("main", requests),
-                groupMeta)) {
-            assertTrue(committer(restarted).commit(cycle).failures().isEmpty());
+        if (fenced) {
+            // restart: a new sink with a new producer takes the id; commits the same Cycle object (producer recovery
+            // only, a real restart re-fetches the requests and re-runs the Handlers)
+            try (var restarted = new KafkaReplySink(new KafkaProducer<>(producerProps), replies,
+                    Map.of("main", requests), groupMeta)) {
+                assertTrue(committer(restarted).commit(cycle).failures().isEmpty());
+            }
         }
 
         var seen = new ArrayList<String>();
