@@ -108,4 +108,4 @@
 
 | # | Task | Status |
 |---|---|---|
-| F39 | Starter guide: fix the cross-reference in the reply undeliverable row (K2) | todo |
+| F39 | Starter guide: fix the cross-reference in the reply undeliverable row (K2) | done |
