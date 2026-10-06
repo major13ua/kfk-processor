@@ -1012,6 +1012,23 @@
         "docs/features/kafka-request-reply"
       ],
       "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r7.md"
+    },
+    {
+      "id": "F38",
+      "title": "Starter guide: all-InvalidRecord round with a last-stage reply pauses as a destination fault (r8 J2)",
+      "layer": "docs",
+      "deps": [
+        "F37"
+      ],
+      "acs": [
+        "AC-08",
+        "AC-08b"
+      ],
+      "dod": "docs/kafka-request-reply-starter-guide.md row 119 (reply undeliverable) no longer says a rejected reply whose Error Reply also fails is dropped without a pause in every case: add one sentence that when every reply of a round is rejected as an invalid record and one is on its last stage (including a single no-fallback Error Reply), the worker pauses as a destination fault (alert request_reply.reply_destination.unavailable, nothing dropped, spec section 8), with compaction or timestamp bounds as likely causes.",
+      "files_hint": [
+        "docs/kafka-request-reply-starter-guide.md"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r8.md"
     }
   ]
 }

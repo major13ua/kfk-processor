@@ -97,3 +97,9 @@
 | # | Task | Status |
 |---|---|---|
 | F37 | Docs and test hardening after F35: javadoc and spec rule wording, bounded get() verified, test-plan names (H2-H4) | done |
+
+## Review follow-ups round 8 (from `_review/review-2026-10-05-r8.md`)
+
+| # | Task | Status |
+|---|---|---|
+| F38 | Starter guide: all-InvalidRecord round pauses as a destination fault (J2) | todo |
