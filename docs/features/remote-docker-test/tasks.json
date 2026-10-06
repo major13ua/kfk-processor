@@ -1,0 +1,170 @@
+{
+  "slug": "remote-docker-test",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Check engine settings precedence and Ryuk socket handling, record the result",
+      "layer": "docs",
+      "deps": [],
+      "acs": [
+        "AC-01"
+      ],
+      "dod": "`spike-findings.md` names the precedence result and the Ryuk socket value, each with the command or test used",
+      "files_hint": [
+        "docs/features/remote-docker-test/spike-findings.md"
+      ],
+      "file": "docs/features/remote-docker-test/tasks/check-engine-settings-precedence.md"
+    },
+    {
+      "id": "T2",
+      "title": "Add the remote switch script plugin and wire the test task environment",
+      "layer": "wiring",
+      "deps": [
+        "T1"
+      ],
+      "acs": [
+        "AC-01",
+        "AC-03",
+        "AC-03b",
+        "AC-07"
+      ],
+      "dod": "a no-switch run prints `Container target: local` and starts containers on the local engine",
+      "files_hint": [
+        "gradle/remote-docker.gradle",
+        "build.gradle"
+      ],
+      "file": "docs/features/remote-docker-test/tasks/add-remote-switch-and-test-environment.md"
+    },
+    {
+      "id": "T3",
+      "title": "Validate the remote address from the per-user setting and refuse bad forms",
+      "layer": "wiring",
+      "deps": [
+        "T2"
+      ],
+      "acs": [
+        "AC-04",
+        "AC-05",
+        "AC-10"
+      ],
+      "dod": "missing property stops the run with the setting and file named, before any container",
+      "files_hint": [
+        "gradle/remote-docker.gradle"
+      ],
+      "file": "docs/features/remote-docker-test/tasks/validate-remote-address-and-private-setting.md"
+    },
+    {
+      "id": "T4",
+      "title": "Open and close the ssh tunnel as a build service within the time budget",
+      "layer": "infra",
+      "deps": [
+        "T3"
+      ],
+      "acs": [
+        "AC-02",
+        "AC-06"
+      ],
+      "dod": "a run against a stopped host stops within 30 s naming the address and starts no container locally",
+      "files_hint": [
+        "gradle/remote-docker.gradle"
+      ],
+      "file": "docs/features/remote-docker-test/tasks/run-ssh-tunnel-build-service.md"
+    },
+    {
+      "id": "T5",
+      "title": "Ping the remote engine through the tunnel and set the reaper socket override",
+      "layer": "infra",
+      "deps": [
+        "T4",
+        "T1"
+      ],
+      "acs": [
+        "AC-08"
+      ],
+      "dod": "with the engine stopped on the remote host the run stops within 30 s with the container-service message",
+      "files_hint": [
+        "gradle/remote-docker.gradle"
+      ],
+      "file": "docs/features/remote-docker-test/tasks/ping-remote-engine-and-set-reaper-socket.md"
+    },
+    {
+      "id": "T6",
+      "title": "Refuse loadTest and preReleaseTest when the remote switch is on",
+      "layer": "wiring",
+      "deps": [
+        "T2"
+      ],
+      "acs": [
+        "AC-09"
+      ],
+      "dod": "both load commands fail fast with the local-only message when `-Premote` is set",
+      "files_hint": [
+        "gradle/remote-docker.gradle"
+      ],
+      "file": "docs/features/remote-docker-test/tasks/refuse-load-commands-in-remote-mode.md"
+    },
+    {
+      "id": "T7",
+      "title": "Test the build logic with Gradle TestKit using a fake ssh and fake engine",
+      "layer": "tests",
+      "deps": [
+        "T3",
+        "T5",
+        "T6"
+      ],
+      "acs": [
+        "AC-01",
+        "AC-03",
+        "AC-03b",
+        "AC-04",
+        "AC-05",
+        "AC-06",
+        "AC-07",
+        "AC-08",
+        "AC-09",
+        "AC-10"
+      ],
+      "dod": "TestKit tests cover AC-01, AC-03, AC-03b, AC-04 to AC-10 and pass",
+      "files_hint": [
+        "src/test/java/xme/common/kfkprocessor/build/",
+        "build.gradle"
+      ],
+      "file": "docs/features/remote-docker-test/tasks/test-build-logic-with-gradle-testkit.md"
+    },
+    {
+      "id": "T8",
+      "title": "Verify remote mode against the real remote host and record findings",
+      "layer": "tests",
+      "deps": [
+        "T7"
+      ],
+      "acs": [
+        "AC-02",
+        "AC-06",
+        "AC-08"
+      ],
+      "dod": "`verification.md` shows 0 containers on the laptop, the timings for both failure modes, and the remote vs local duration",
+      "files_hint": [
+        "docs/features/remote-docker-test/verification.md"
+      ],
+      "file": "docs/features/remote-docker-test/tasks/verify-against-a-real-remote-host.md"
+    },
+    {
+      "id": "T9",
+      "title": "Write the developer how-to for remote mode",
+      "layer": "docs",
+      "deps": [
+        "T5"
+      ],
+      "acs": [
+        "AC-04",
+        "AC-10"
+      ],
+      "dod": "a new Developer can follow the how-to to a first remote run (setup time recorded against the 15 minute KPI in T8)",
+      "files_hint": [
+        "docs/remote-docker-test.md"
+      ],
+      "file": "docs/features/remote-docker-test/tasks/write-developer-how-to.md"
+    }
+  ]
+}
