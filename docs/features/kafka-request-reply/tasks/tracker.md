@@ -102,4 +102,4 @@
 
 | # | Task | Status |
 |---|---|---|
-| F38 | Starter guide: all-InvalidRecord round pauses as a destination fault (J2) | todo |
+| F38 | Starter guide: all-InvalidRecord round pauses as a destination fault (J2) | done |
