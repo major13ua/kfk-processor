@@ -143,9 +143,9 @@ The committed approach is a named remote mode selected by one build switch. With
 
 ### AC-10 (US-07) — authorization
 
-**Given** a remote host address that is neither a secure-shell address nor a network address with certificate verification configured
+**Given** a remote host address that is not a secure-shell address
 **When** the Developer selects remote mode
-**Then** the run is refused and the Developer is told that a secure-shell or certificate-secured connection is required
+**Then** the run is refused and the Developer is told that a secure-shell address is required
 
 ## 6. Non-functional requirements
 
@@ -160,7 +160,7 @@ The committed approach is a named remote mode selected by one build switch. With
 
 - **Data classification:** internal, because test data is synthetic but the remote host is an internal asset.
 - **Personal data touched:** none.
-- **AuthZ/AuthN impact:** new trust boundary, since access to the remote host's container engine is equivalent to full control of that machine; the project only ever connects over authenticated channels (AC-10). Securing the remote machine itself is the Developer's precondition.
+- **AuthZ/AuthN impact:** new trust boundary, since access to the remote host's container engine is equivalent to full control of that machine; the project only ever connects over a secure-shell channel (AC-10). Securing the remote machine itself is the Developer's precondition.
 - **Abuse cases:**
   - Open engine port: anyone on the private network takes over the host; the project refuses plain connections (AC-10).
   - Address committed by mistake: hidden from shared files (AC-05).
@@ -175,6 +175,5 @@ The committed approach is a named remote mode selected by one build switch. With
 ## 8. Open questions
 
 - [ ] Is cleanup of leftover containers on the remote host needed, or handled by hand? Default now: manual. — owner: I.Chupryna, due: before `sdd:design`
-- [ ] Does the existing container tooling work with the secure-shell form of the host address? Default now: yes, with certificate-secured connection as the fallback. — owner: I.Chupryna, due: before `sdd:design`
 - [ ] Performance tests inside the normal test command run remotely and may fail on network delay: keep the same thresholds, set per-mode thresholds, or skip them in remote mode? Default now: same thresholds. — owner: I.Chupryna, due: after the first measured remote run
 - [ ] Is a remote suite duration of at most 150% of local the right target? Default now: 150% as a proposal. — owner: I.Chupryna, due: after the first measured remote run
