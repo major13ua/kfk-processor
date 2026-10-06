@@ -23,7 +23,7 @@ The committed approach is a named remote mode selected by one build switch. With
 
 ## 2. Goals
 
-- A Developer can run the functional test suite with zero containers on their own machine, using one switch.
+- A Developer can run the normal test command (the functional suite, which includes the performance tests that already run inside it) with zero containers on their own machine, using one switch.
 - Default behaviour with no switch is identical to today.
 - It is always clear which machine ran the tests, and there is no silent fallback.
 
@@ -32,7 +32,7 @@ The committed approach is a named remote mode selected by one build switch. With
 - CI setup: CI keeps what it uses today, and this feature covers developer machines only.
 - Provisioning or administering the remote host: each Developer sets up their own remote machine.
 - Multiple remote hosts, shared hosts or load balancing: each Developer uses one remote machine of their own, to keep the change small.
-- Remote performance and load runs: they stay local-only, because network latency distorts timings.
+- Remote runs of the separate load and pre-release test commands: they stay local-only, because network latency distorts timings. Performance tests inside the normal test command do run remotely (see §8).
 - Automatic cleanup of leftover containers on the remote host: undecided, tracked in §8.
 
 ## 4. User stories
@@ -52,7 +52,7 @@ The committed approach is a named remote mode selected by one build switch. With
 ### US-03: Keep host address private
 
 **As a** Developer
-**I want** to set my remote host address once, privately
+**I want** to set my remote host address once per machine, in a per-user setting outside the project
 **So that** I do not share or commit it and need not retype it
 
 ### US-04: Stop clearly when host unreachable
@@ -67,10 +67,10 @@ The committed approach is a named remote mode selected by one build switch. With
 **I want** every run to state whether it used my machine or the remote host
 **So that** I can trust where the load went
 
-### US-06: Know performance runs are local-only
+### US-06: Know load runs are local-only
 
 **As a** Developer
-**I want** to be told that performance and load runs are local-only
+**I want** to be told that the separate load and pre-release commands are local-only
 **So that** I do not read network-distorted timings as product numbers
 
 ### US-07: Use only authenticated connections
@@ -83,7 +83,7 @@ The committed approach is a named remote mode selected by one build switch. With
 
 ### AC-01 (US-01) — happy path
 
-**Given** a Developer who selected no switch
+**Given** a Developer who selected no switch, whatever container-host setting exists in the Developer's environment or user-level tool configuration
 **When** the Developer runs the test suite
 **Then** all containers start on the Developer's own machine and tests behave as before
 
@@ -95,9 +95,15 @@ The committed approach is a named remote mode selected by one build switch. With
 
 ### AC-03 (US-02) — domain invariant violation
 
-**Given** a Developer whose previous local run finished successfully and nothing has changed
-**When** the Developer runs the suite with the remote switch
-**Then** the tests run again and the run is not reported as already done
+**Given** a Developer whose earlier run, in either mode, finished successfully and nothing has changed
+**When** the Developer runs the test suite with the remote switch
+**Then** the tests run again and the run is never reported as already done
+
+### AC-03b (US-02) — domain invariant violation
+
+**Given** a Developer whose earlier remote run finished successfully and nothing has changed
+**When** the Developer runs the test suite without the switch
+**Then** the tests run again on the Developer's own machine and the earlier remote result is not reused
 
 ### AC-04 (US-03) — error
 
@@ -107,15 +113,15 @@ The committed approach is a named remote mode selected by one build switch. With
 
 ### AC-05 (US-03) — domain invariant
 
-**Given** a Developer who has configured a remote host address
+**Given** a Developer who has configured a remote host address once in a per-user setting outside the project
 **When** the Developer shares or commits project changes
-**Then** the address is not part of the shared project files
+**Then** the address is not part of the shared project files, and the same setting serves every copy of the project on that machine
 
 ### AC-06 (US-04) — error
 
 **Given** a Developer who selected the remote switch while the remote host is unreachable
 **When** the run starts
-**Then** the run stops within 30 seconds, names the address it tried, and starts no container on the Developer's machine
+**Then** the run stops within 30 seconds, names the address it tried, and starts no container on the Developer's machine; "unreachable" means the container service does not answer at the configured address, for any connection failure including the host being down
 
 ### AC-07 (US-05) — happy path
 
@@ -125,19 +131,19 @@ The committed approach is a named remote mode selected by one build switch. With
 
 ### AC-08 (US-04) — cross-context
 
-**Given** a Developer who selected the remote switch while the remote host is reachable but its container service is not running
+**Given** a Developer who selected the remote switch while the remote host accepts the Developer's secure-shell connection but its container service is not running
 **When** the run starts
-**Then** the run stops, tells the Developer that the container service on the remote host is not running, and starts no container on the Developer's machine
+**Then** within 30 seconds the run stops, tells the Developer that the container service on the remote host is not running, and starts no container on the Developer's machine
 
 ### AC-09 (US-06) — domain invariant
 
 **Given** a Developer who selected the remote switch
-**When** the Developer requests a performance or load run
-**Then** the run is refused with a message that these runs are local-only
+**When** the Developer requests the separate load or pre-release test command
+**Then** that command is refused with a message that these runs are local-only
 
 ### AC-10 (US-07) — authorization
 
-**Given** a remote host address that uses an unauthenticated plain connection
+**Given** a remote host address that is neither a secure-shell address nor a network address with certificate verification configured
 **When** the Developer selects remote mode
 **Then** the run is refused and the Developer is told that a secure-shell or certificate-secured connection is required
 
@@ -148,7 +154,7 @@ The committed approach is a named remote mode selected by one build switch. With
 | Unreachable-host detection | ≤ 30 s | timed run against a stopped host |
 | Containers on the Developer's machine in remote mode | 0 | container list on the machine after a run |
 | Remote suite duration vs local | ≤ 150% (proposal, unmeasured; see §8) | same suite started from the same Developer machine, local mode vs remote mode |
-| Remote host addresses in the repository | 0 | repository scan |
+| Remote host addresses in the project | 0 | scan of tracked files and the working tree |
 
 ## 6.1 Security / privacy
 
@@ -170,4 +176,5 @@ The committed approach is a named remote mode selected by one build switch. With
 
 - [ ] Is cleanup of leftover containers on the remote host needed, or handled by hand? Default now: manual. — owner: I.Chupryna, due: before `sdd:design`
 - [ ] Does the existing container tooling work with the secure-shell form of the host address? Default now: yes, with certificate-secured connection as the fallback. — owner: I.Chupryna, due: before `sdd:design`
+- [ ] Performance tests inside the normal test command run remotely and may fail on network delay: keep the same thresholds, set per-mode thresholds, or skip them in remote mode? Default now: same thresholds. — owner: I.Chupryna, due: after the first measured remote run
 - [ ] Is a remote suite duration of at most 150% of local the right target? Default now: 150% as a proposal. — owner: I.Chupryna, due: after the first measured remote run
