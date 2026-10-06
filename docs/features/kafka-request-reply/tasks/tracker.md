@@ -103,3 +103,9 @@
 | # | Task | Status |
 |---|---|---|
 | F38 | Starter guide: all-InvalidRecord round pauses as a destination fault (J2) | done |
+
+## Review follow-ups round 9 (from `_review/review-2026-10-05-r9.md`)
+
+| # | Task | Status |
+|---|---|---|
+| F39 | Starter guide: fix the cross-reference in the reply undeliverable row (K2) | todo |

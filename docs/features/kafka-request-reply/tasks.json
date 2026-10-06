@@ -1029,6 +1029,22 @@
         "docs/kafka-request-reply-starter-guide.md"
       ],
       "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r8.md"
+    },
+    {
+      "id": "F39",
+      "title": "Starter guide: fix the cross-reference in the reply undeliverable row (r9 K2)",
+      "layer": "docs",
+      "deps": [
+        "F38"
+      ],
+      "acs": [
+        "AC-08b"
+      ],
+      "dod": "docs/kafka-request-reply-starter-guide.md row 119 (reply undeliverable): replace 'see the invalid reply topic note below' with a reference that resolves to the compaction gotcha (Compaction is unsupported for reply topics, around line 163). Leave the cause list wording (timestamp and size bounds) for the deferred K1 entry in spec section 8.",
+      "files_hint": [
+        "docs/kafka-request-reply-starter-guide.md"
+      ],
+      "file": "docs/features/kafka-request-reply/_review/review-2026-10-05-r9.md"
     }
   ]
 }
