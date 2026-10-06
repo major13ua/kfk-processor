@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
@@ -266,8 +267,10 @@ class DefaultKafkaDestinationProbeTest {
         KafkaFuture<Config> f = mock(KafkaFuture.class);
         when(f.get(anyLong(), any(java.util.concurrent.TimeUnit.class)))
                 .thenThrow(new java.util.concurrent.TimeoutException("describeConfigs timed out"));
+        when(f.get()).thenThrow(new AssertionError("describeConfigs must be awaited with a time bound"));
         cleanupPolicy(f);
         assertDoesNotThrow(() -> probe().probe());
+        verify(f).get(anyLong(), any(java.util.concurrent.TimeUnit.class));
         assertConfigDescribed();
     }
 

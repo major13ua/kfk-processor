@@ -96,4 +96,4 @@
 
 | # | Task | Status |
 |---|---|---|
-| F37 | Docs and test hardening after F35: javadoc and spec rule wording, bounded get() verified, test-plan names (H2-H4) | todo |
+| F37 | Docs and test hardening after F35: javadoc and spec rule wording, bounded get() verified, test-plan names (H2-H4) | done |
