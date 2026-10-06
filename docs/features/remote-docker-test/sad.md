@@ -235,7 +235,7 @@ ADR files live under `docs/features/remote-docker-test/adr/NNNN-<title>.md`.
 | Timing-sensitive tests flake over the VPN | Medium | open question in spec §8 on thresholds per mode | I.Chupryna |
 | Tunnel dies with the VPN mid-run, failing every later test | Medium | accepted, the run fails visibly, rerun after reconnecting | I.Chupryna |
 | Leftover containers on the remote host after a killed run | Low | manual prune, tracked in spec §8 | I.Chupryna |
-| Open architectural decision: how the build forces local mode against ambient `~/.testcontainers.properties` (force it, or refuse with a message naming the file, which would need spec AC-01 amended) | Open question | Resolve before `sdd:tasks`, by a short check of Testcontainers' configuration precedence | I.Chupryna |
+| Resolved (T1, `spike-findings.md`): env vars beat the user file, so remote mode sets them; local mode clears them and refuses with a message naming `~/.testcontainers.properties` when it points off the machine | Closed | spec AC-01 note added in spike-findings §2 | I.Chupryna |
 
 **Accepted debt (acceptable in v1, plan to fix later):**
 - Only the ssh form is supported. A certificate-secured network address is a possible later feature (spec AC-10 was narrowed to ssh).

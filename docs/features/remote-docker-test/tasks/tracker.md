@@ -5,8 +5,8 @@
 
 | # | Task | Layer | Owner | Estimate | Blocked by | Status |
 |---|---|---|---|---|---|---|
-| T1 | Check engine settings precedence and Ryuk socket handling, record the result | docs | I.Chupryna | S | — | todo |
-| T2 | Add the remote switch script plugin and wire the test task environment | wiring | I.Chupryna | M | T1 | todo |
+| T1 | Check engine settings precedence and Ryuk socket handling, record the result | docs | I.Chupryna | S | — | done |
+| T2 | Add the remote switch script plugin and wire the test task environment | wiring | I.Chupryna | M | T1 | done |
 | T3 | Validate the remote address from the per-user setting and refuse bad forms | wiring | I.Chupryna | M | T2 | todo |
 | T4 | Open and close the ssh tunnel as a build service within the time budget | infra | I.Chupryna | M | T3 | todo |
 | T5 | Ping the remote engine through the tunnel and set the reaper socket override | infra | I.Chupryna | M | T4, T1 | todo |
