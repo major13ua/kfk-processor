@@ -1,6 +1,6 @@
 package xme.common.kfkprocessor.requestreply.autoconfig;
 
-import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
+import static xme.common.kfkprocessor.TestcontainersConfiguration.sharedKafka;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -11,17 +11,13 @@ import java.util.UUID;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
 
 /** The probe against a real broker (no ACLs: every operation is allowed, so denial is covered by the unit test). */
-@Testcontainers
 class DefaultKafkaDestinationProbeIT {
 
-    @Container
-    static KafkaContainer kafka = newKafka();
+    static KafkaContainer kafka = sharedKafka();
 
     @Test
     void passesOnARealBrokerForExistingTopicsAndAnUnusedTransactionalId() throws Exception {

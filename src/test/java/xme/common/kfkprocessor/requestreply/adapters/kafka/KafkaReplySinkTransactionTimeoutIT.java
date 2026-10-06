@@ -1,6 +1,6 @@
 package xme.common.kfkprocessor.requestreply.adapters.kafka;
 
-import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
+import static xme.common.kfkprocessor.TestcontainersConfiguration.sharedKafka;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,8 +28,6 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 import xme.common.kfkprocessor.requestreply.api.RequestReplyProperties;
 import xme.common.kfkprocessor.requestreply.api.Reply;
@@ -53,16 +51,12 @@ import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
  * producer recovery, not the restart path (a restart re-fetches the requests and re-runs the Handlers); it commits
  * exactly one reply per request with the positions advanced once.
  */
-@Testcontainers
 class KafkaReplySinkTransactionTimeoutIT {
 
     private static final Duration TXN_TIMEOUT = Duration.ofSeconds(3);
     private static final int N = 5;
 
-    @Container
-    static KafkaContainer kafka = newKafka(k -> k
-            // the broker aborts timed-out transactions promptly instead of after the 10 s default sweep
-            .withEnv("KAFKA_TRANSACTION_ABORT_TIMED_OUT_TRANSACTION_CLEANUP_INTERVAL_MS", "500"));
+    static KafkaContainer kafka = sharedKafka();
 
     private static byte[] b(String s) {
         return s.getBytes(StandardCharsets.UTF_8);

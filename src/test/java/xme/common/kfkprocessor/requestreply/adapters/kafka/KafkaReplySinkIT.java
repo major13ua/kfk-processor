@@ -1,6 +1,6 @@
 package xme.common.kfkprocessor.requestreply.adapters.kafka;
 
-import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
+import static xme.common.kfkprocessor.TestcontainersConfiguration.sharedKafka;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,8 +26,6 @@ import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 import xme.common.kfkprocessor.requestreply.api.RequestReplyProperties;
 import xme.common.kfkprocessor.requestreply.ports.CommitResult;
@@ -37,11 +35,9 @@ import xme.common.kfkprocessor.requestreply.ports.ReplyRecord;
  * Each test creates its own topics, group and identity, so tests share only the (never destroyed) broker.
  * Readers use read_committed, as Requesters must (ADR-0002).
  */
-@Testcontainers
 class KafkaReplySinkIT {
 
-    @Container
-    static KafkaContainer kafka = newKafka();
+    static KafkaContainer kafka = sharedKafka();
 
     private record Env(String group, String identity, String requests, String replies) {
         static Env create() throws Exception {

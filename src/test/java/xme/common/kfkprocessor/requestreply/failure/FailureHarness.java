@@ -1,6 +1,6 @@
 package xme.common.kfkprocessor.requestreply.failure;
 
-import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
+import static xme.common.kfkprocessor.TestcontainersConfiguration.sharedKafka;
 import static xme.common.kfkprocessor.TestcontainersConfiguration.newRedis;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
@@ -55,12 +55,11 @@ public final class FailureHarness {
     public static final double BUDGET_TOLERANCE = 1.10;
     public static final Duration WAIT = Duration.ofSeconds(60);
 
-    public static final KafkaContainer KAFKA = newKafka();
+    public static final KafkaContainer KAFKA = sharedKafka();
     public static final GenericContainer<?> REDIS;
     public static final int REDIS_PORT = freePort();
 
     static {
-        KAFKA.start();
         // fixed host port so the store can be stopped and started again on the same address
         REDIS = newRedis()
                 .withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withPortBindings(

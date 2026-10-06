@@ -1,6 +1,6 @@
 package xme.common.kfkprocessor.requestreply.adapters.kafka;
 
-import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
+import static xme.common.kfkprocessor.TestcontainersConfiguration.sharedKafka;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -21,8 +21,6 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 import xme.common.kfkprocessor.requestreply.api.RequestReplyProperties;
 import xme.common.kfkprocessor.requestreply.ports.IncomingRequest;
@@ -32,11 +30,9 @@ import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
  * Each test creates its own topics and group, so tests share only the (never destroyed) broker.
  * Header names follow the OQ-1 default (headers).
  */
-@Testcontainers
 class KafkaRequestLanesIT {
 
-    @Container
-    static KafkaContainer kafka = newKafka();
+    static KafkaContainer kafka = sharedKafka();
 
     private static final Duration WINDOW = Duration.ofSeconds(45);
 

@@ -31,10 +31,26 @@ public class TestcontainersConfiguration {
         return new GenericContainer<>(DockerImageName.parse(REDIS_IMAGE)).withExposedPorts(REDIS_PORT);
     }
 
-    @Bean
+    /**
+     * The one broker of the whole test JVM: started on first use, never stopped by a test class or a Spring context
+     * (the Ryuk reaper removes it at JVM exit). Tests isolate themselves with unique topic and group names.
+     */
+    public static KafkaContainer sharedKafka() {
+        return SharedKafka.INSTANCE;
+    }
+
+    @Bean(destroyMethod = "")
     @ServiceConnection
     KafkaContainer kafkaContainer() {
-        return newKafka();
+        return sharedKafka();
+    }
+
+    private static final class SharedKafka {
+        static final KafkaContainer INSTANCE = newKafka();
+
+        static {
+            INSTANCE.start();
+        }
     }
 
 }

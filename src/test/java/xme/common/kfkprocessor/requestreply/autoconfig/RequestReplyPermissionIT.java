@@ -1,6 +1,6 @@
 package xme.common.kfkprocessor.requestreply.autoconfig;
 
-import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
+import static xme.common.kfkprocessor.TestcontainersConfiguration.sharedKafka;
 import static xme.common.kfkprocessor.TestcontainersConfiguration.newRedis;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -71,8 +71,7 @@ class RequestReplyPermissionIT {
     static final AtomicInteger HANDLED = new AtomicInteger();
     static final List<CommitRetry.Alert> ALERTS = new CopyOnWriteArrayList<>();
 
-    @Container
-    static KafkaContainer kafka = newKafka();
+    static KafkaContainer kafka = sharedKafka();
 
     @Container
     static GenericContainer<?> redis = newRedis();
