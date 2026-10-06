@@ -1,5 +1,6 @@
 package xme.common.kfkprocessor.requestreply.autoconfig;
 
+import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -20,7 +21,7 @@ import xme.common.kfkprocessor.requestreply.ports.ReplyDestinationFault;
 class DefaultKafkaDestinationProbeIT {
 
     @Container
-    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.0");
+    static KafkaContainer kafka = newKafka();
 
     @Test
     void passesOnARealBrokerForExistingTopicsAndAnUnusedTransactionalId() throws Exception {

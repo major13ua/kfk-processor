@@ -1,5 +1,6 @@
 package xme.common.kfkprocessor.requestreply.adapters.allowance;
 
+import static xme.common.kfkprocessor.TestcontainersConfiguration.newRedis;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,7 +13,6 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 import xme.common.kfkprocessor.requestreply.api.AllowanceStoreUnavailableException;
 
 @TestMethodOrder(OutageLastOrderer.class)
@@ -22,8 +22,7 @@ class RedisAllowanceStoreIT {
     private static final long BUDGET = 100;
 
     @Container
-    static GenericContainer<?> redis =
-            new GenericContainer<>(DockerImageName.parse("redis:7")).withExposedPorts(6379);
+    static GenericContainer<?> redis = newRedis();
 
     private String uri() {
         return "redis://" + redis.getHost() + ":" + redis.getMappedPort(6379);

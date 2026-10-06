@@ -1,5 +1,7 @@
 package xme.common.kfkprocessor.requestreply.failure;
 
+import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
+import static xme.common.kfkprocessor.TestcontainersConfiguration.newRedis;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -36,7 +38,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.support.GenericApplicationContext;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.kafka.KafkaContainer;
-import org.testcontainers.utility.DockerImageName;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.PortBinding;
 import com.github.dockerjava.api.model.Ports;
@@ -54,14 +55,14 @@ public final class FailureHarness {
     public static final double BUDGET_TOLERANCE = 1.10;
     public static final Duration WAIT = Duration.ofSeconds(60);
 
-    public static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
+    public static final KafkaContainer KAFKA = newKafka();
     public static final GenericContainer<?> REDIS;
     public static final int REDIS_PORT = freePort();
 
     static {
         KAFKA.start();
         // fixed host port so the store can be stopped and started again on the same address
-        REDIS = new GenericContainer<>(DockerImageName.parse("redis:7")).withExposedPorts(6379)
+        REDIS = newRedis()
                 .withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withPortBindings(
                         new PortBinding(Ports.Binding.bindPort(REDIS_PORT), new ExposedPort(6379))));
         REDIS.start();

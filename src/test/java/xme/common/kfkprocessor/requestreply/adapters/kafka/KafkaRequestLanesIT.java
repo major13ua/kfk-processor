@@ -1,5 +1,6 @@
 package xme.common.kfkprocessor.requestreply.adapters.kafka;
 
+import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,7 +36,7 @@ import xme.common.kfkprocessor.requestreply.ports.WorkerMetrics;
 class KafkaRequestLanesIT {
 
     @Container
-    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.0");
+    static KafkaContainer kafka = newKafka();
 
     private static final Duration WINDOW = Duration.ofSeconds(45);
 

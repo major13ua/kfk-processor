@@ -1,5 +1,6 @@
 package xme.common.kfkprocessor.requestreply.adapters.kafka;
 
+import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -40,7 +41,7 @@ import xme.common.kfkprocessor.requestreply.ports.ReplyRecord;
 class KafkaReplySinkIT {
 
     @Container
-    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.0");
+    static KafkaContainer kafka = newKafka();
 
     private record Env(String group, String identity, String requests, String replies) {
         static Env create() throws Exception {

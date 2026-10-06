@@ -1,5 +1,7 @@
 package xme.common.kfkprocessor.requestreply.autoconfig;
 
+import static xme.common.kfkprocessor.TestcontainersConfiguration.newKafka;
+import static xme.common.kfkprocessor.TestcontainersConfiguration.newRedis;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
@@ -34,7 +36,6 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
-import org.testcontainers.utility.DockerImageName;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import xme.common.kfkprocessor.requestreply.api.RequestReplyHandler;
@@ -60,10 +61,10 @@ class RequestReplyEndToEndIT {
     static final String REPLIES = "rep-" + ID;
 
     @Container
-    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.0");
+    static KafkaContainer kafka = newKafka();
 
     @Container
-    static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7")).withExposedPorts(6379);
+    static GenericContainer<?> redis = newRedis();
 
     @Configuration(proxyBeanMethods = false)
     @ImportAutoConfiguration(RequestReplyAutoConfiguration.class)
