@@ -42,3 +42,7 @@ out/
 
 ### MACOS ###
 *.DS_Store
+
+
+### AI ###
+**/verification.md
