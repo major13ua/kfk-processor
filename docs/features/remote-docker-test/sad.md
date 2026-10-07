@@ -2,7 +2,7 @@
 status: Draft
 owner: "I.Chupryna"
 reviewers: ["Tech Lead", "Security Lead"]
-updated_at: "2026-10-06"
+updated_at: "2026-10-07"
 feature_size: "S"
 target_surfaces: [cli]
 ---
@@ -98,7 +98,7 @@ Target surface: `cli`. The feature is a developer-facing command-line switch in 
 - Banner line at task start: `Container target: local` or `Container target: remote ssh://user@host`.
 - One 30 second budget, measured from the start of the run, covers validation, tunnel start and engine ping together (spec AC-06, AC-08).
 - The Ryuk reaper container mounts the engine socket, so in remote mode the build also sets `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` to `remoteDocker.socket`, the socket path on the remote host (to be verified in the first task).
-- Cleanup of leftover containers stays with Testcontainers' own reaper container (Ryuk), reached through the host override. Orphans after a dead run stay manual (spec §8).
+- Cleanup of leftover containers stays with Testcontainers' own reaper container (Ryuk), reached through the host override. Orphans after a dead run are left to Testcontainers' reaper (spec §8).
 
 ## 5. Building block view
 
@@ -174,7 +174,7 @@ sequenceDiagram
     end
 ```
 
-**Critical flow 2: local run** — the script clears any engine environment variables for the test JVM, prints `Container target: local` and starts the tests. No tunnel.
+**Critical flow 2: local run** — the script clears engine environment variables that point to another machine (a local socket is kept), refuses the run when the user-level Testcontainers file points elsewhere, prints `Container target: local` and starts the tests. No tunnel.
 
 ## 7. Deployment view
 
@@ -224,7 +224,7 @@ ADR files live under `docs/features/remote-docker-test/adr/NNNN-<title>.md`.
 
 **QG-3. Offload**
 - **When:** a Developer runs the normal test command in remote mode.
-- **Then:** 0 containers on the Developer's machine, and suite duration at most 150% of local (proposal, unmeasured, spec §6 and §8).
+- **Then:** 0 containers on the Developer's machine, and suite duration at most 150% of local (spec §6; §8: no visible impact observed).
 - **How verify:** container list on the laptop after a run, and a timed local versus remote run of the same suite from the same machine.
 
 ## 11. Risks and technical debt
@@ -234,9 +234,9 @@ ADR files live under `docs/features/remote-docker-test/adr/NNNN-<title>.md`.
 | Container ports on the remote host are not reachable from the laptop (VPN or firewall rules) | High | the engine check also opens a test connection to a throwaway port, or documents the required rules | I.Chupryna |
 | Ambient settings in `~/.testcontainers.properties` may send a no-switch run remote even with a cleared environment | High | decided by the open architectural decision row below, no ADR until the precedence is known | I.Chupryna |
 | The failure suite picks a free port on the laptop and pins it on the remote host | Medium | choose the port from the remote side or avoid fixed host ports in remote mode | I.Chupryna |
-| Timing-sensitive tests flake over the VPN | Medium | open question in spec §8 on thresholds per mode | I.Chupryna |
+| Timing-sensitive tests flake over the VPN | Medium | same thresholds in both modes (spec §8: no visible impact); remote-only timing failures recorded in verification.md | I.Chupryna |
 | Tunnel dies with the VPN mid-run, failing every later test | Medium | accepted, the run fails visibly, rerun after reconnecting | I.Chupryna |
-| Leftover containers on the remote host after a killed run | Low | manual prune, tracked in spec §8 | I.Chupryna |
+| Leftover containers on the remote host after a killed run | Low | left to Testcontainers' reaper (spec §8); manual prune otherwise | I.Chupryna |
 | Resolved (T1, `spike-findings.md`): env vars beat the user file, so remote mode sets them; local mode clears them and refuses with a message naming `~/.testcontainers.properties` when it points off the machine | Closed | spec AC-01 note added in spike-findings §2 | I.Chupryna |
 
 **Accepted debt (acceptable in v1, plan to fix later):**

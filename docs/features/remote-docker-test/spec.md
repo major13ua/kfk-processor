@@ -2,7 +2,7 @@
 status: Draft
 owner: "I.Chupryna"
 reviewers: ["Tech Lead", "Security Lead"]
-updated_at: "2026-10-06"
+updated_at: "2026-10-07"
 feature_size: "S"
 ---
 
@@ -32,8 +32,8 @@ The committed approach is a named remote mode selected by one build switch. With
 - CI setup: CI keeps what it uses today, and this feature covers developer machines only.
 - Provisioning or administering the remote host: each Developer sets up their own remote machine.
 - Multiple remote hosts, shared hosts or load balancing: each Developer uses one remote machine of their own, to keep the change small.
-- Remote runs of the separate load and pre-release test commands: they stay local-only, because network latency distorts timings. Performance tests inside the normal test command do run remotely (see §8).
-- Automatic cleanup of leftover containers on the remote host: undecided, tracked in §8.
+- Remote runs of the separate load and pre-release test commands: they stay local-only, because network latency distorts timings. Performance tests inside the normal test command do run remotely (§8: no visible impact; timing-sensitive tests may differ).
+- Automatic cleanup of leftover containers on the remote host: left to Testcontainers' own reaper (§8).
 
 ## 4. User stories
 
@@ -85,13 +85,13 @@ The committed approach is a named remote mode selected by one build switch. With
 
 **Given** a Developer who selected no switch
 **When** the Developer runs the test suite
-**Then** all containers start on the Developer's own machine and tests behave as before; engine settings in the Developer's environment are cleared for the run, and a setting in the user-level tool configuration file that points to another machine stops the run with a message naming the file and the setting (no silent remote run)
+**Then** all containers start on the Developer's own machine and tests behave as before; engine settings in the Developer's environment that point to another machine are cleared for the run (a local socket setting is kept), and a setting in the user-level tool configuration file that may point to another machine stops the run with a message naming the file and the setting (no silent remote run)
 
 ### AC-02 (US-02) — happy path
 
 **Given** a Developer with a configured, reachable remote host
 **When** the Developer runs the test suite with the remote switch
-**Then** every container starts on the remote host and none on the Developer's machine, the tests reach those containers at the remote host's address, and they pass as they do locally
+**Then** every container starts on the remote host and none on the Developer's machine, the tests reach those containers at the remote host's address, and they pass as they do locally, except timing-sensitive tests whose result depends on network delay (accepted; recorded in `verification.md`)
 
 ### AC-03 (US-02) — domain invariant violation
 
@@ -153,8 +153,8 @@ The committed approach is a named remote mode selected by one build switch. With
 |---|---|---|
 | Unreachable-host detection | ≤ 30 s | timed run against a stopped host |
 | Containers on the Developer's machine in remote mode | 0 | container list on the machine after a run |
-| Remote suite duration vs local | ≤ 150% (proposal, unmeasured; see §8) | same suite started from the same Developer machine, local mode vs remote mode |
-| Remote host addresses in the project | 0 | scan of tracked files and the working tree |
+| Remote suite duration vs local | ≤ 150% (§8: no visible impact observed) | same suite started from the same Developer machine, local mode vs remote mode |
+| Remote host addresses in the project | 0 | scan of tracked files (`git ls-files`) |
 
 ## 6.1 Security / privacy
 
