@@ -195,10 +195,18 @@ class RemoteDockerBuildTest {
     // AC-10: anything that is not an ssh address is refused
     @Test
     void nonSshAddressesAreRefused() {
-        for (String bad : List.of("tcp://10.0.0.5:2375", "http://box.example", "ssh://", "ssh://box.example", "box")) {
+        for (String bad : List.of("tcp://10.0.0.5:2375", "http://box.example", "ssh://", "box")) {
             BuildResult r = remoteWith(bad, "test").fail();
             assertThat(r.getOutput()).as(bad).contains("secure-shell address");
         }
+        assertThat(home.resolve("ssh-args")).doesNotExist();
+    }
+
+    // AC-10: an ssh address without a user gets its own message
+    @Test
+    void sshAddressWithoutUserIsRefusedWithItsOwnMessage() {
+        BuildResult r = remoteWith("ssh://box.example", "test").fail();
+        assertThat(r.getOutput()).contains("user is required").contains("ssh://user@host");
         assertThat(home.resolve("ssh-args")).doesNotExist();
     }
 

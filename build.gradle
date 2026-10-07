@@ -68,7 +68,7 @@ tasks.register('buildLogicTest', Test) {
     filter { includeTestsMatching 'xme.common.kfkprocessor.build.*' }
     outputs.upToDateWhen { false }
 }
-tasks.named('check') { dependsOn 'buildLogicTest' }
+// Run on demand: `./gradlew buildLogicTest` (needs bash, python3 and unix sockets); not part of `check`.
 
 // Slow load/throughput runs (T17): `./gradlew loadTest`; excluded from the default `test` task.
 tasks.register('loadTest', Test) {

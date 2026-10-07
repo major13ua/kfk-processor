@@ -39,3 +39,6 @@ out/
 ### SDD ###
 .claude/*.local.md
 .worktrees/
+
+### MACOS ###
+*.DS_Store

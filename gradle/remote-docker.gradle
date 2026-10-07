@@ -148,6 +148,9 @@ gradle.taskGraph.whenReady { graph ->
             stop("remote mode needs the setting 'remoteDocker.host' (for example remoteDocker.host=ssh://user@host). " +
                     'Set it in ~/.gradle/gradle.properties, not in the project.')
         }
+        if (sshHostOf(address) == null && address.startsWith('ssh://') && !address.contains('@') && address.length() > 'ssh://'.length()) {
+            stop("remoteDocker.host needs a user: user is required, like ssh://user@host, got '${address}'.".toString())
+        }
         if (sshHostOf(address) == null) {
             stop("remoteDocker.host must be a secure-shell address like ssh://user@host, got '${address}'. " +
                     'Plain tcp:// and http:// engine addresses are refused.')

@@ -169,6 +169,8 @@ sequenceDiagram
         Script-->>Dev: stop and name the address tried
     else engine does not answer within 30 seconds
         Script-->>Dev: stop and say the container service on the remote host is not running
+    else loadTest or preReleaseTest requested
+        Script-->>Dev: stop and say these tasks are local-only; run them without the remote switch
     end
 ```
 

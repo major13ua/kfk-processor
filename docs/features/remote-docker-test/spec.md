@@ -83,9 +83,9 @@ The committed approach is a named remote mode selected by one build switch. With
 
 ### AC-01 (US-01) — happy path
 
-**Given** a Developer who selected no switch, whatever container-host setting exists in the Developer's environment or user-level tool configuration
+**Given** a Developer who selected no switch
 **When** the Developer runs the test suite
-**Then** all containers start on the Developer's own machine and tests behave as before
+**Then** all containers start on the Developer's own machine and tests behave as before; engine settings in the Developer's environment are cleared for the run, and a setting in the user-level tool configuration file that points to another machine stops the run with a message naming the file and the setting (no silent remote run)
 
 ### AC-02 (US-02) — happy path
 
@@ -174,6 +174,9 @@ The committed approach is a named remote mode selected by one build switch. With
 
 ## 8. Open questions
 
-- [ ] Is cleanup of leftover containers on the remote host needed, or handled by hand? Default now: manual. — owner: I.Chupryna, due: before `sdd:design`
-- [ ] Performance tests inside the normal test command run remotely and may fail on network delay: keep the same thresholds, set per-mode thresholds, or skip them in remote mode? Default now: same thresholds. — owner: I.Chupryna, due: after the first measured remote run
-- [ ] Is a remote suite duration of at most 150% of local the right target? Default now: 150% as a proposal. — owner: I.Chupryna, due: after the first measured remote run
+- [X] Is cleanup of leftover containers on the remote host needed, or handled by hand? Default now: manual. — owner: I.Chupryna, due: before `sdd:design`
+  Answer: Test Container kills all leftover containers by itself. 
+- [X] Performance tests inside the normal test command run remotely and may fail on network delay: keep the same thresholds, set per-mode thresholds, or skip them in remote mode? Default now: same thresholds. — owner: I.Chupryna, due: after the first measured remote run
+  Answer: No visible impact on performance. Not an issue.
+- [X] Is a remote suite duration of at most 150% of local the right target? Default now: 150% as a proposal. — owner: I.Chupryna, due: after the first measured remote run
+  Answer: No visible impact on performance. Not an issue.
